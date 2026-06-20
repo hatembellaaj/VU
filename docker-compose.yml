@@ -1,0 +1,13 @@
+version: "3.8"
+services:
+  vu-app:
+    build: .
+    container_name: vu-pharmaco-app
+    ports:
+      - "19200:8501"
+    volumes:
+      - ./app:/app
+      - ./data:/data
+    env_file:
+      - .env
+    restart: unless-stopped
