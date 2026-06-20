@@ -588,73 +588,139 @@ elif page == "📋 Méthodologie":
 
     st.info(
         """
-        **À quoi sert ce fichier ?**
+        **Comment ça marche ?**
 
-        La méthodologie est injectée dans chaque prompt Claude lors de la génération
-        des diapositives (Lot 2). Elle définit le ton, la structure narrative, les
-        formulations recommandées et les règles métier Agence VU.
-
-        **Comment la remplir ?**
-        1. Analysez les exemples dans Lot 1
-        2. Identifiez les patterns de rédaction récurrents
-        3. Documentez ici les règles métier: ton, structure, KPIs prioritaires,
-           seuils sectoriels, formulations types
+        1. **Lot 1** : chargez un PPTX exemple (présentation réelle Agence VU)
+        2. **Ici** : cliquez sur "🤖 Générer la méthodologie" — Claude analyse les slides
+           et induit automatiquement les règles de transformation
+        3. Relisez, ajustez si besoin, puis **sauvegardez**
+        4. La méthodologie sauvegardée est réutilisée pour tous les projets futurs (Lot 2)
         """
     )
 
-    # Load existing methodology
+    # ── Chargement initial ────────────────────────────────────────────────────
     if not st.session_state["methodology_text"]:
         st.session_state["methodology_text"] = load_methodology()
+
+    # ── État du PPTX exemple ─────────────────────────────────────────────────
+    pptx_texts = st.session_state.get("lot1_pptx_texts", {})
+    n_slides   = len(pptx_texts)
+
+    col_status, col_action = st.columns([2, 1])
+
+    with col_status:
+        if n_slides:
+            st.success(f"✅ PPTX exemple chargé — **{n_slides} diapositives** disponibles pour l'analyse")
+        else:
+            st.warning(
+                "⚠️ Aucun PPTX exemple chargé. "
+                "Importez un fichier `.pptx` dans **Lot 1 → Section PPTX** pour activer la génération automatique."
+            )
+
+    # ── Estimation coût + bouton Générer ─────────────────────────────────────
+    with col_action:
+        can_generate = n_slides > 0 and api_key_is_set()
+
+        if not api_key_is_set():
+            st.error("Clé API manquante")
+        elif n_slides == 0:
+            st.button("🤖 Générer la méthodologie", disabled=True)
+        else:
+            from generation.methodology_generator import MethodologyGenerator
+            _mg_tmp = MethodologyGenerator(api_key=get_api_key(), model=get_model())
+            est = _mg_tmp.estimate_cost(pptx_texts)
+
+            st.caption(
+                f"Estimation : ~{est['slides_selected']}/{est['slides_total']} slides sélectionnées  \n"
+                f"~{est['input_tokens']:,} tokens entrée  \n"
+                f"Coût estimé : **${est['total_cost_usd']:.4f}**"
+            )
+
+            if st.button("🤖 Générer la méthodologie", type="primary", use_container_width=True):
+                with st.spinner("Claude analyse le PPTX exemple et induit la méthodologie…"):
+                    try:
+                        mg = MethodologyGenerator(api_key=get_api_key(), model=get_model())
+                        generated = mg.generate(pptx_texts)
+                        st.session_state["methodology_text"] = generated
+                        # Auto-save fichier global
+                        save_methodology(generated)
+                        # Auto-save projet actif
+                        pid = st.session_state.get("current_project_id")
+                        if pid:
+                            pm.save_methodology(pid, generated)
+                        st.success("✅ Méthodologie générée et sauvegardée !")
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"Erreur lors de la génération : {exc}")
+
+    st.markdown("---")
+
+    # ── Éditeur ───────────────────────────────────────────────────────────────
+    st.markdown("### ✏️ Méthodologie (éditable)")
 
     methodology_content = st.text_area(
         "Contenu de la méthodologie",
         value=st.session_state["methodology_text"],
-        height=500,
+        height=600,
         placeholder=(
-            "Exemple:\n\n"
-            "## Ton et style\n"
-            "- Professionnel, factuel, orienté solutions\n"
-            "- Éviter le jargon trop technique\n"
-            "- Commencer par les constats, finir par les recommandations\n\n"
-            "## Structure des diapositives performance\n"
-            "1. Constat principal (1-2 phrases)\n"
-            "2. Analyse des causes (2-3 points)\n"
-            "3. Recommandation actionnable\n\n"
-            "## Seuils sectoriels pharmacie France\n"
-            "- CA moyen officine: 1,2M€\n"
-            "- Panier moyen: 28-35€\n"
-            "- Taux de fidélisation objectif: 60%\n"
+            "La méthodologie sera générée automatiquement depuis le PPTX exemple.\n\n"
+            "Vous pouvez aussi la saisir ou la modifier manuellement ici."
         ),
         key="methodology_textarea",
     )
 
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        if st.button("💾 Sauvegarder la méthodologie", type="primary"):
+    # ── Actions ───────────────────────────────────────────────────────────────
+    action_cols = st.columns([2, 2, 2, 3])
+
+    with action_cols[0]:
+        if st.button("💾 Sauvegarder", type="primary", use_container_width=True):
             st.session_state["methodology_text"] = methodology_content
             if save_methodology(methodology_content):
-                st.success("✅ Méthodologie sauvegardée dans `/data/methodology.txt`")
-                # Auto-save projet
                 pid = st.session_state.get("current_project_id")
                 if pid:
                     pm.save_methodology(pid, methodology_content)
-                    st.toast("💾 Méthodologie sauvegardée dans le projet actif", icon="💾")
+                st.success("✅ Sauvegardée")
 
-    with col2:
-        if st.button("🔄 Recharger depuis le fichier"):
+    with action_cols[1]:
+        if st.button("🔄 Recharger", use_container_width=True):
             loaded = load_methodology()
             st.session_state["methodology_text"] = loaded
             st.rerun()
 
-    # Word count
+    with action_cols[2]:
+        if methodology_content:
+            st.download_button(
+                label="📥 Télécharger (.md)",
+                data=methodology_content.encode("utf-8"),
+                file_name="methodologie_agence_vu.md",
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+    with action_cols[3]:
+        methodo_upload = st.file_uploader(
+            "📤 Importer une méthodologie (.md / .txt)",
+            type=["md", "txt"],
+            key="methodo_import_uploader",
+            label_visibility="collapsed",
+        )
+        if methodo_upload:
+            imported = methodo_upload.read().decode("utf-8")
+            st.session_state["methodology_text"] = imported
+            save_methodology(imported)
+            pid = st.session_state.get("current_project_id")
+            if pid:
+                pm.save_methodology(pid, imported)
+            st.success("✅ Méthodologie importée et sauvegardée")
+            st.rerun()
+
+    # ── Stats + aperçu ────────────────────────────────────────────────────────
     if methodology_content:
         word_count = len(methodology_content.split())
         char_count = len(methodology_content)
         st.caption(f"📝 {word_count} mots — {char_count} caractères")
 
-    # Preview
-    if methodology_content:
-        with st.expander("👁️ Aperçu de la méthodologie"):
+        with st.expander("👁️ Aperçu rendu"):
             st.markdown(methodology_content)
 
 
