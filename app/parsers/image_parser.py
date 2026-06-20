@@ -128,7 +128,7 @@ class ImageParser:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=2048,
+                max_tokens=4096,
                 messages=[
                     {
                         "role": "user",
@@ -152,10 +152,20 @@ class ImageParser:
 
             raw_text = response.content[0].text.strip()
 
-            # Try to extract JSON if surrounded by markdown code blocks
+            # Strategy 1: complete markdown block  ```json ... ```
             json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw_text)
             if json_match:
                 raw_text = json_match.group(1).strip()
+            else:
+                # Strategy 2: opening ``` without closing (truncated response)
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text).strip()
+
+            # Strategy 3: find the JSON object boundaries as last resort
+            if not raw_text.startswith("{"):
+                start = raw_text.find("{")
+                end = raw_text.rfind("}")
+                if start != -1 and end > start:
+                    raw_text = raw_text[start : end + 1]
 
             parsed = json.loads(raw_text)
             valeurs = parsed.get("valeurs_extraites", [])
