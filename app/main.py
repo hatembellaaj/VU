@@ -174,6 +174,39 @@ if page == "🔬 Lot 1 — Analyse des exemples":
     )
 
     # -----------------------------------------------------------------------
+    # Section 0: Charger données existantes (JSON précédemment exporté)
+    # -----------------------------------------------------------------------
+    with st.expander("📂 Charger des données déjà extraites (JSON)", expanded=True):
+        st.markdown(
+            "Si vous avez déjà effectué l'extraction et exporté un fichier "
+            "`lot1_all_data.json`, chargez-le ici pour restaurer la session "
+            "**sans relancer les appels API.**"
+        )
+        json_restore_file = st.file_uploader(
+            "Fichier JSON exporté",
+            type=["json"],
+            key="lot1_json_restore",
+        )
+        if json_restore_file:
+            try:
+                restored = json.loads(json_restore_file.read().decode("utf-8"))
+                excel_res  = restored.get("excel", [])
+                pptx_res   = restored.get("pptx", {})
+                images_res = restored.get("images", [])
+
+                st.session_state["lot1_excel_results"]  = excel_res
+                st.session_state["lot1_pptx_texts"]     = pptx_res
+                st.session_state["lot1_image_results"]  = images_res
+
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Fichiers Excel",   len(excel_res))
+                col_b.metric("Slides PPTX",      len(pptx_res))
+                col_c.metric("Images extraites", len(images_res))
+                st.success("✅ Session restaurée — vous pouvez passer directement à la Méthodologie.")
+            except Exception as exc:
+                st.error(f"Impossible de lire le fichier JSON : {exc}")
+
+    # -----------------------------------------------------------------------
     # Section A: Excel files
     # -----------------------------------------------------------------------
     with st.expander("📊 Fichiers Excel (données financières)", expanded=True):
