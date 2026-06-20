@@ -6,7 +6,19 @@ import anthropic
 
 
 # Slide definitions for the "Performance Globale" section (Part 2)
+# PG_00_CONTEXTE est généré uniquement si un PDF de contexte est fourni
 PERFORMANCE_GLOBALE_SLIDES = [
+    {
+        "slide_id": "PG_00_CONTEXTE",
+        "titre_defaut": "Contexte & Présentation de l'officine",
+        "description": (
+            "Slide d'introduction qui résume le contexte de la pharmacie : "
+            "localisation, historique, positionnement, enjeux identifiés. "
+            "Basé exclusivement sur le document de contexte fourni."
+        ),
+        "kpis_requis": [],           # pas de KPIs — basé sur le PDF contexte
+        "requires_context": True,    # slide ignorée si pas de PDF contexte
+    },
     {
         "slide_id": "PG_01_INTRO",
         "titre_defaut": "Performance Globale — Vue d'ensemble",
@@ -114,6 +126,46 @@ class LLMGenerator:
                 )
 
         return "{\n" + ",\n".join(kpi_lines) + "\n}"
+
+    def _build_context_prompt(
+        self,
+        context_text: str,
+        methodology: str,
+        pharmacy_name: str = "",
+    ) -> str:
+        """
+        Prompt dédié pour le slide de contexte (PG_00_CONTEXTE).
+        Basé uniquement sur le document de contexte — aucun KPI.
+        """
+        pharmacy_label = pharmacy_name or "la pharmacie"
+        return f"""Tu es un expert en marketing pharmaceutique travaillant pour l'Agence VU.
+Tu dois rédiger le contenu du **premier slide** de l'audit stratégique 360° de {pharmacy_label}.
+Ce slide de contexte présente la pharmacie avant toute analyse de performance.
+
+## DOCUMENT DE CONTEXTE (source exclusive)
+```
+{context_text[:6000]}
+```
+
+## MÉTHODOLOGIE AGENCE VU (ton et style)
+{methodology if methodology else "Adopter un ton professionnel, factuel et orienté action."}
+
+## CONSIGNE
+Rédige un slide d'introduction qui synthétise :
+- La présentation de la pharmacie (localisation, type, historique si mentionné)
+- Le contexte stratégique (enjeux, projets en cours, points saillants)
+- Les 2-3 axes d'analyse qui vont suivre dans le rapport
+
+Utilise UNIQUEMENT les informations présentes dans le document de contexte.
+N'invente aucun chiffre ni fait non mentionné.
+
+## FORMAT DE RÉPONSE (JSON strict, aucun texte avant ou après)
+{{
+  "titre": "Titre du slide (ex: Pharmacie du Marché — Contexte & Enjeux)",
+  "contenu": "Texte du slide en français (4-6 bullets maximum, style Agence VU)",
+  "chiffres_cites": [],
+  "sources": ["Document de contexte PDF"]
+}}"""
 
     def _build_grounded_prompt(
         self,
@@ -266,6 +318,7 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
         kpi_dict: dict,
         methodology: str,
         pharmacy_name: str = "",
+        context_text: str = "",
     ) -> list:
         """
         Generate all slides for the "Performance Globale" section (Part 2).
@@ -274,12 +327,55 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
             kpi_dict: Computed KPIs from KPIEngine.
             methodology: Methodology text from Lot 1.
             pharmacy_name: Name of the pharmacy.
+            context_text: Raw text extracted from the context PDF (optional).
+                          If provided, generates an extra intro slide PG_00_CONTEXTE.
 
         Returns:
-            List of slide content dicts.
+            List of slide content dicts (PG_00 first if context provided).
         """
         slides = []
         for slide_def in PERFORMANCE_GLOBALE_SLIDES:
+
+            # ── Slide contexte — traitement spécial ──────────────────────────
+            if slide_def.get("requires_context"):
+                if not context_text:
+                    continue   # ignore PG_00 si pas de PDF contexte fourni
+                try:
+                    prompt = self._build_context_prompt(
+                        context_text=context_text,
+                        methodology=methodology,
+                        pharmacy_name=pharmacy_name,
+                    )
+                    response = self.client.messages.create(
+                        model=self.model,
+                        max_tokens=1024,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    raw = response.content[0].text.strip()
+                    json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+                    if json_match:
+                        raw = json_match.group(1).strip()
+                    parsed = json.loads(raw)
+                    slides.append({
+                        "slide_id":      slide_def["slide_id"],
+                        "titre":         parsed.get("titre", slide_def["titre_defaut"]),
+                        "contenu":       parsed.get("contenu", ""),
+                        "chiffres_cites": [],
+                        "sources":       parsed.get("sources", ["Document de contexte PDF"]),
+                        "erreur":        None,
+                    })
+                except Exception as exc:
+                    slides.append({
+                        "slide_id":      slide_def["slide_id"],
+                        "titre":         slide_def["titre_defaut"],
+                        "contenu":       "",
+                        "chiffres_cites": [],
+                        "sources":       [],
+                        "erreur":        f"Erreur slide contexte: {exc}",
+                    })
+                continue
+
+            # ── Slides KPI standards ──────────────────────────────────────────
             result = self.generate_slide(
                 slide_id=slide_def["slide_id"],
                 kpi_dict=kpi_dict,
@@ -290,4 +386,5 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
                 required_kpi_ids=slide_def.get("kpis_requis"),
             )
             slides.append(result)
+
         return slides

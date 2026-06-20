@@ -56,6 +56,7 @@ def init_session_state():
         "lot2_audit": None,
         "lot2_pptx_bytes": None,
         "lot2_pharmacy_name": "",
+        "lot2_context_text": "",
         "methodology_text": "",
         # Gestion de projet
         "current_project_id": None,
@@ -912,7 +913,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
     # -----------------------------------------------------------------------
     st.subheader("📁 Fichiers d'entrée")
 
-    upload_col1, upload_col2, upload_col3 = st.columns(3)
+    upload_col1, upload_col2, upload_col3, upload_col4 = st.columns(4)
 
     with upload_col1:
         st.markdown("**📊 Fichiers Excel**")
@@ -938,7 +939,6 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
     with upload_col3:
         st.markdown("**📋 Questionnaire**")
-
         lot2_questionnaire_file = st.file_uploader(
             "PDF ou JSON",
             type=["pdf", "json"],
@@ -948,11 +948,10 @@ elif page == "🚀 Lot 2 — Générer un rapport":
         if lot2_questionnaire_file:
             ext = lot2_questionnaire_file.name.rsplit(".", 1)[-1].lower()
             if ext == "pdf":
-                st.caption(f"✅ PDF chargé — structuration via Claude")
+                st.caption("✅ PDF chargé — structuration via Claude")
             else:
-                st.caption(f"✅ JSON chargé")
+                st.caption("✅ JSON chargé")
 
-        # Alternative: manual JSON input
         with st.expander("Ou saisir manuellement (JSON)"):
             questionnaire_manual = st.text_area(
                 "JSON du questionnaire",
@@ -961,6 +960,20 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                 help="Format JSON: {\"clé\": valeur}",
                 key="questionnaire_manual_input",
             )
+
+    with upload_col4:
+        st.markdown("**📄 Contexte pharmacie (PDF)**")
+        st.caption("Génère le 1er slide d'introduction")
+        lot2_context_pdf = st.file_uploader(
+            "Document de contexte PDF",
+            type=["pdf"],
+            accept_multiple_files=False,
+            key="lot2_context_uploader",
+        )
+        if lot2_context_pdf:
+            st.caption(f"✅ {lot2_context_pdf.name}")
+        elif st.session_state.get("lot2_context_text"):
+            st.caption("✅ Contexte déjà extrait en session")
 
     st.markdown("---")
 
@@ -1019,10 +1032,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
         use_container_width=True,
     ):
         # Reset previous results
-        st.session_state["lot2_kpis"] = None
-        st.session_state["lot2_slides"] = None
-        st.session_state["lot2_audit"] = None
-        st.session_state["lot2_pptx_bytes"] = None
+        st.session_state["lot2_kpis"]         = None
+        st.session_state["lot2_slides"]        = None
+        st.session_state["lot2_audit"]         = None
+        st.session_state["lot2_pptx_bytes"]    = None
+        st.session_state["lot2_context_text"]  = ""
 
         # ===================================================================
         # STEP 1 — Parse all inputs
@@ -1103,6 +1117,21 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                         st.write(f"    ❌ Erreur: {exc}")
             elif lot2_image_files and not api_key_is_set():
                 st.write("  ⚠️ Images ignorées (clé API manquante)")
+
+            # Extraction PDF contexte (premier slide)
+            context_text = st.session_state.get("lot2_context_text", "")
+            if lot2_context_pdf:
+                st.write("  📄 Extraction du PDF de contexte...")
+                try:
+                    from parsers.pdf_questionnaire_parser import PDFQuestionnaireParser
+                    ctx_bytes = lot2_context_pdf.read()
+                    ctx_parser = PDFQuestionnaireParser()
+                    context_text = ctx_parser.extract_text(ctx_bytes)
+                    st.session_state["lot2_context_text"] = context_text
+                    n_chars = len(context_text)
+                    st.write(f"    ✅ {n_chars:,} caractères extraits du PDF contexte")
+                except Exception as exc:
+                    st.write(f"    ❌ Erreur extraction contexte : {exc}")
 
             # Parse questionnaire (PDF ou JSON)
             questionnaire_data = {}
@@ -1293,6 +1322,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                         kpi_dict=kpis,
                         methodology=methodology,
                         pharmacy_name=pharmacy_name,
+                        context_text=st.session_state.get("lot2_context_text", ""),
                     )
                     st.session_state["lot2_slides"] = slides
 
