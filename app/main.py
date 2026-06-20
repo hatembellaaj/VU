@@ -24,6 +24,7 @@ from engine.audit import AuditEngine
 from generation.llm_generator import LLMGenerator
 from pptx_builder.assembler import PPTXAssembler
 from utils.cost_estimator import estimate_excel_info, estimate_image_cost, format_cost
+from utils import project_manager as pm
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -55,6 +56,11 @@ def init_session_state():
         "lot2_pptx_bytes": None,
         "lot2_pharmacy_name": "",
         "methodology_text": "",
+        # Gestion de projet
+        "current_project_id": None,
+        "current_project_name": None,
+        "project_just_loaded": False,
+        "confirm_delete": False,
     }
     for key, val in defaults.items():
         if key not in st.session_state:
@@ -127,14 +133,97 @@ def safe_json_dumps(obj) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Sidebar navigation
+# Sidebar — Projet + Navigation
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.image(
-        "https://via.placeholder.com/200x60/1A2E4A/FFFFFF?text=Agence+VU",
-        use_container_width=True,
-    )
+    st.markdown("## 💊 Agence VU")
     st.markdown("---")
+
+    # ── Projet actif ────────────────────────────────────────────────────────
+    st.markdown("### 📁 Projet")
+
+    projects = pm.list_projects()
+    project_options = {p["id"]: pm.project_summary(p) for p in projects}
+
+    # Sélecteur de projet existant
+    if projects:
+        selected_id = st.selectbox(
+            "Projet actif",
+            options=[""] + list(project_options.keys()),
+            format_func=lambda x: "— Sélectionner un projet —" if x == "" else project_options[x],
+            index=0 if not st.session_state["current_project_id"]
+                  else ([""] + list(project_options.keys())).index(
+                      st.session_state["current_project_id"]
+                  ) if st.session_state["current_project_id"] in project_options else 0,
+            key="sidebar_project_select",
+        )
+        if selected_id and selected_id != st.session_state["current_project_id"]:
+            st.session_state["current_project_id"] = selected_id
+            meta = pm.load_project(selected_id)
+            st.session_state["current_project_name"] = meta["nom"] if meta else ""
+            updated = pm.project_to_session(selected_id, st.session_state)
+            st.session_state["project_just_loaded"] = True
+            st.rerun()
+
+    # Affichage projet actif
+    if st.session_state["current_project_id"]:
+        meta = pm.load_project(st.session_state["current_project_id"])
+        if meta:
+            st.success(f"**{meta['nom']}**\n\n{pm.statut_badge(meta.get('statut','nouveau'))}")
+
+            col_save, col_del = st.columns(2)
+            with col_save:
+                if st.button("💾 Sauvegarder", use_container_width=True, key="btn_save_project"):
+                    pm.session_to_project(st.session_state["current_project_id"], st.session_state)
+                    st.toast("✅ Projet sauvegardé !", icon="💾")
+            with col_del:
+                if st.button("🗑️ Supprimer", use_container_width=True, key="btn_del_project",
+                             type="secondary"):
+                    st.session_state["confirm_delete"] = True
+
+            if st.session_state.get("confirm_delete"):
+                st.warning("Supprimer définitivement ce projet ?")
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("✅ Oui", key="confirm_del_yes"):
+                        pm.delete_project(st.session_state["current_project_id"])
+                        st.session_state["current_project_id"] = None
+                        st.session_state["current_project_name"] = None
+                        st.session_state["confirm_delete"] = False
+                        st.rerun()
+                with c2:
+                    if st.button("❌ Non", key="confirm_del_no"):
+                        st.session_state["confirm_delete"] = False
+                        st.rerun()
+    else:
+        st.info("Aucun projet actif.")
+
+    # Créer un nouveau projet
+    with st.expander("➕ Nouveau projet"):
+        new_nom      = st.text_input("Nom du projet", placeholder="Ex: Pharmacie Alésienne 2025", key="new_proj_nom")
+        new_pharma   = st.text_input("Nom de la pharmacie", placeholder="Ex: Pharmacie Alésienne", key="new_proj_pharma")
+        if st.button("Créer", type="primary", key="btn_create_project"):
+            if new_nom and new_pharma:
+                meta = pm.create_project(new_nom, new_pharma)
+                st.session_state["current_project_id"]   = meta["id"]
+                st.session_state["current_project_name"] = meta["nom"]
+                st.session_state["lot2_pharmacy_name"]   = meta["pharmacie"]
+                # Reset session data pour nouveau projet
+                st.session_state["lot1_excel_results"]  = []
+                st.session_state["lot1_pptx_texts"]     = {}
+                st.session_state["lot1_image_results"]  = []
+                st.session_state["lot2_kpis"]           = None
+                st.session_state["lot2_slides"]         = None
+                st.session_state["lot2_audit"]          = None
+                st.session_state["lot2_pptx_bytes"]     = None
+                st.session_state["methodology_text"]    = ""
+                st.rerun()
+            else:
+                st.warning("Remplissez les deux champs.")
+
+    st.markdown("---")
+
+    # ── Navigation ──────────────────────────────────────────────────────────
     st.markdown("### Navigation")
     page = st.radio(
         "Sélectionnez une section",
@@ -147,7 +236,6 @@ with st.sidebar:
     )
     st.markdown("---")
 
-    # API status indicator
     if api_key_is_set():
         st.success("✅ Clé API configurée")
     else:
@@ -155,7 +243,7 @@ with st.sidebar:
 
     st.markdown(f"**Modèle:** `{get_model()}`")
     st.markdown("---")
-    st.caption("Agence VU © 2024 — Pipeline Pharmacie v1.0")
+    st.caption("Agence VU © 2026 — Pipeline Pharmacie v1.0")
 
 
 # ===========================================================================
@@ -203,6 +291,12 @@ if page == "🔬 Lot 1 — Analyse des exemples":
                 col_b.metric("Slides PPTX",      len(pptx_res))
                 col_c.metric("Images extraites", len(images_res))
                 st.success("✅ Session restaurée — vous pouvez passer directement à la Méthodologie.")
+
+                # Auto-save si un projet est actif
+                pid = st.session_state.get("current_project_id")
+                if pid:
+                    pm.session_to_project(pid, st.session_state)
+                    st.toast("💾 Données sauvegardées dans le projet actif", icon="💾")
             except Exception as exc:
                 st.error(f"Impossible de lire le fichier JSON : {exc}")
 
@@ -540,6 +634,11 @@ elif page == "📋 Méthodologie":
             st.session_state["methodology_text"] = methodology_content
             if save_methodology(methodology_content):
                 st.success("✅ Méthodologie sauvegardée dans `/data/methodology.txt`")
+                # Auto-save projet
+                pid = st.session_state.get("current_project_id")
+                if pid:
+                    pm.save_methodology(pid, methodology_content)
+                    st.toast("💾 Méthodologie sauvegardée dans le projet actif", icon="💾")
 
     with col2:
         if st.button("🔄 Recharger depuis le fichier"):
@@ -882,6 +981,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     },
                 )
 
+                # Auto-save KPIs dans le projet actif
+                pid = st.session_state.get("current_project_id")
+                if pid:
+                    pm.save_kpis(pid, kpis)
+
                 status.update(label="Étape 2 — KPIs calculés ✅", state="complete")
 
             except Exception as exc:
@@ -952,6 +1056,12 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                                 f"  ✅ {slide['slide_id']}: "
                                 f"'{slide['titre']}' — {n_chiffres} chiffre(s) cité(s)"
                             )
+
+                    # Auto-save slides dans le projet actif
+                    pid = st.session_state.get("current_project_id")
+                    if pid:
+                        pm.save_slides(pid, slides)
+                        pm.update_project_meta(pid, statut="lot2")
 
                     status.update(
                         label=f"Étape 3 — {len(slides)} diapositives générées ✅",
@@ -1040,6 +1150,13 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
                     size_kb = len(pptx_bytes) / 1024
                     st.write(f"✅ PowerPoint assemblé ({size_kb:.1f} Ko, {len(slides)+1} diapositive(s))")
+
+                    # Auto-save PPTX dans le projet actif
+                    pid = st.session_state.get("current_project_id")
+                    if pid:
+                        pm.save_pptx(pid, pptx_bytes)
+                        st.write("💾 PPTX sauvegardé dans le projet")
+
                     status.update(label="Étape 5 — PowerPoint prêt ✅", state="complete")
 
                 except Exception as exc:
