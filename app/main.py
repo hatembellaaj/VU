@@ -789,19 +789,23 @@ elif page == "🚀 Lot 2 — Générer un rapport":
             st.caption(f"✅ {len(lot2_image_files)} image(s) chargée(s)")
 
     with upload_col3:
-        st.markdown("**📋 Questionnaire (JSON)**")
-        st.caption("Format: `{\"question\": \"réponse\", ...}`")
+        st.markdown("**📋 Questionnaire**")
+
         lot2_questionnaire_file = st.file_uploader(
-            "Questionnaire JSON",
-            type=["json"],
+            "PDF ou JSON",
+            type=["pdf", "json"],
             accept_multiple_files=False,
             key="lot2_questionnaire_uploader",
         )
         if lot2_questionnaire_file:
-            st.caption("✅ Questionnaire chargé")
+            ext = lot2_questionnaire_file.name.rsplit(".", 1)[-1].lower()
+            if ext == "pdf":
+                st.caption(f"✅ PDF chargé — structuration via Claude")
+            else:
+                st.caption(f"✅ JSON chargé")
 
         # Alternative: manual JSON input
-        with st.expander("Ou saisir le questionnaire manuellement"):
+        with st.expander("Ou saisir manuellement (JSON)"):
             questionnaire_manual = st.text_area(
                 "JSON du questionnaire",
                 value="{}",
@@ -952,22 +956,48 @@ elif page == "🚀 Lot 2 — Générer un rapport":
             elif lot2_image_files and not api_key_is_set():
                 st.write("  ⚠️ Images ignorées (clé API manquante)")
 
-            # Parse questionnaire
+            # Parse questionnaire (PDF ou JSON)
             questionnaire_data = {}
             if lot2_questionnaire_file:
-                st.write("  📋 Parsing questionnaire JSON...")
-                try:
-                    raw_json = lot2_questionnaire_file.read().decode("utf-8")
-                    questionnaire_raw = json.loads(raw_json)
-                    q_parser = QuestionnaireParser()
-                    questionnaire_data = q_parser.parse(questionnaire_raw)
-                    total_q = sum(
-                        len(v) for v in questionnaire_data.values()
-                    )
-                    st.write(f"    ✅ {total_q} réponse(s) parsées")
-                except Exception as exc:
-                    parse_errors.append(f"Questionnaire: {exc}")
-                    st.write(f"    ❌ Erreur: {exc}")
+                ext = lot2_questionnaire_file.name.rsplit(".", 1)[-1].lower()
+
+                if ext == "pdf":
+                    st.write("  📋 Extraction du questionnaire PDF (Claude Vision)...")
+                    try:
+                        from parsers.pdf_questionnaire_parser import PDFQuestionnaireParser
+                        pdf_bytes = lot2_questionnaire_file.read()
+                        pdf_q_parser = PDFQuestionnaireParser(
+                            api_key=get_api_key() if api_key_is_set() else None,
+                            model=get_model(),
+                        )
+                        questionnaire_raw = pdf_q_parser.parse(
+                            pdf_bytes,
+                            use_llm=api_key_is_set(),
+                        )
+                        st.write(f"    🔍 {len(questionnaire_raw)} champ(s) détecté(s) dans le PDF")
+                        # Affiche un aperçu
+                        with st.expander("Aperçu questionnaire extrait du PDF", expanded=False):
+                            st.json(questionnaire_raw)
+                        q_parser = QuestionnaireParser()
+                        questionnaire_data = q_parser.parse(questionnaire_raw)
+                        total_q = sum(len(v) for v in questionnaire_data.values())
+                        st.write(f"    ✅ {total_q} réponse(s) structurée(s)")
+                    except Exception as exc:
+                        parse_errors.append(f"Questionnaire PDF: {exc}")
+                        st.write(f"    ❌ Erreur: {exc}")
+
+                else:  # JSON
+                    st.write("  📋 Parsing questionnaire JSON...")
+                    try:
+                        raw_json = lot2_questionnaire_file.read().decode("utf-8")
+                        questionnaire_raw = json.loads(raw_json)
+                        q_parser = QuestionnaireParser()
+                        questionnaire_data = q_parser.parse(questionnaire_raw)
+                        total_q = sum(len(v) for v in questionnaire_data.values())
+                        st.write(f"    ✅ {total_q} réponse(s) parsées")
+                    except Exception as exc:
+                        parse_errors.append(f"Questionnaire JSON: {exc}")
+                        st.write(f"    ❌ Erreur: {exc}")
             elif "questionnaire_manual_input" in st.session_state:
                 manual_json_str = st.session_state.get("questionnaire_manual_input", "{}")
                 if manual_json_str.strip() not in ("{}", ""):
