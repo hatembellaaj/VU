@@ -51,6 +51,55 @@ class ImageParser:
 
         return encoded, media_type
 
+    @staticmethod
+    def _repair_truncated_json(text: str) -> str:
+        """
+        Attempt to repair a JSON string truncated mid-stream.
+        Finds the last fully closed object in the array and closes the structure.
+        """
+        try:
+            json.loads(text)
+            return text  # already valid
+        except json.JSONDecodeError:
+            pass
+
+        # Find the last complete entry: last occurrence of '}' followed by ',' or whitespace then ']'
+        # Walk backwards to find the last valid closing brace of a complete object
+        last_complete = -1
+        depth = 0
+        in_string = False
+        escape_next = False
+
+        for i, ch in enumerate(text):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == '\\' and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 1:  # closed one entry inside the outer object's array
+                    last_complete = i
+
+        if last_complete != -1:
+            repaired = text[:last_complete + 1] + "\n  ]\n}"
+            try:
+                json.loads(repaired)
+                return repaired
+            except json.JSONDecodeError:
+                pass
+
+        # Last resort: return empty valid structure
+        return '{"valeurs_extraites": []}'
+
     def parse(
         self,
         image_path_or_bytes: Union[str, bytes, io.BytesIO],
@@ -128,7 +177,7 @@ class ImageParser:
         try:
             response = self.client.messages.create(
                 model=self.model,
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[
                     {
                         "role": "user",
@@ -167,7 +216,7 @@ class ImageParser:
                 if start != -1 and end > start:
                     raw_text = raw_text[start : end + 1]
 
-            parsed = json.loads(raw_text)
+            parsed = json.loads(self._repair_truncated_json(raw_text))
             valeurs = parsed.get("valeurs_extraites", [])
 
             # Normalize and validate entries

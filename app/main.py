@@ -23,6 +23,7 @@ from engine.kpi_engine import KPIEngine
 from engine.audit import AuditEngine
 from generation.llm_generator import LLMGenerator
 from pptx_builder.assembler import PPTXAssembler
+from utils.cost_estimator import estimate_excel_info, estimate_image_cost, format_cost
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -188,13 +189,37 @@ if page == "🔬 Lot 1 — Analyse des exemples":
         )
 
         if excel_files:
+            # ── Estimation des coûts avant traitement ──────────────────────
+            st.markdown("**📋 Récapitulatif avant traitement**")
+            cost_rows = []
+            file_bytes_cache = {}
+            for uf in excel_files:
+                raw = uf.read()
+                file_bytes_cache[uf.name] = raw
+                info = estimate_excel_info(raw, uf.name)
+                cost_rows.append({
+                    "Fichier": uf.name,
+                    "Taille": f"{info['size_kb']:.1f} Ko",
+                    "Onglets": ", ".join(info["sheets"]) if info["sheets"] else "—",
+                    "Appel API": "❌ Non (traitement local)",
+                    "Coût estimé": "$0.00",
+                })
+            st.dataframe(
+                pd.DataFrame(cost_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+            st.info("✅ Les fichiers Excel sont parsés localement — aucun coût API.")
+
             parser = ExcelParser()
             all_results = []
 
             for uploaded_file in excel_files:
+                # Réutilise les bytes déjà lus
+                uploaded_file._buffer = io.BytesIO(file_bytes_cache[uploaded_file.name])
                 with st.spinner(f"Analyse de {uploaded_file.name}..."):
                     try:
-                        file_bytes = io.BytesIO(uploaded_file.read())
+                        file_bytes = io.BytesIO(file_bytes_cache[uploaded_file.name])
                         file_bytes.name = uploaded_file.name
                         result = parser.parse(file_bytes)
                         all_results.append(result)
@@ -321,6 +346,35 @@ if page == "🔬 Lot 1 — Analyse des exemples":
         )
 
         if image_files:
+            # ── Estimation des coûts avant traitement ──────────────────────
+            st.markdown("**📋 Récapitulatif avant traitement**")
+            img_cost_rows = []
+            img_bytes_cache = {}
+            total_cost = 0.0
+            for img_file in image_files:
+                raw = img_file.read()
+                img_bytes_cache[img_file.name] = raw
+                est = estimate_image_cost(raw)
+                total_cost += est["total_cost_usd"]
+                img_cost_rows.append({
+                    "Fichier": img_file.name,
+                    "Taille": f"{len(raw)/1024:.1f} Ko",
+                    "Dimensions": f"{est['width']}×{est['height']} px",
+                    "Tokens entrée": f"{est['input_tokens']:,}",
+                    "Tokens sortie": f"~{est['output_tokens']:,}",
+                    "Coût estimé": format_cost(est["total_cost_usd"]),
+                })
+            st.dataframe(
+                pd.DataFrame(img_cost_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+            st.info(
+                f"💰 **Coût total estimé pour {len(image_files)} image(s) : "
+                f"{format_cost(total_cost)}**  \n"
+                f"_(entrée $3/MTok + sortie $15/MTok — modèle {get_model()})_"
+            )
+
             if not api_key_is_set():
                 st.error(
                     "Impossible d'analyser les images sans clé API Anthropic. "
@@ -336,7 +390,7 @@ if page == "🔬 Lot 1 — Analyse des exemples":
                 for img_file in image_files:
                     with st.spinner(f"Analyse de {img_file.name} avec Claude Vision..."):
                         try:
-                            img_bytes = img_file.read()
+                            img_bytes = img_bytes_cache[img_file.name]
                             result = image_parser.parse(img_bytes, filename=img_file.name)
                             all_image_results.append(result)
 
@@ -559,6 +613,46 @@ elif page == "🚀 Lot 2 — Générer un rapport":
             )
 
     st.markdown("---")
+
+    # ── Estimation des coûts Lot 2 ──────────────────────────────────────────
+    if lot2_excel_files or lot2_image_files:
+        st.subheader("💰 Estimation des coûts API")
+        preview_rows = []
+
+        for uf in (lot2_excel_files or []):
+            preview_rows.append({
+                "Fichier": uf.name,
+                "Type": "Excel",
+                "Taille": f"{uf.size/1024:.1f} Ko",
+                "Appel API": "❌ Non",
+                "Coût estimé": "$0.00",
+            })
+
+        lot2_img_total = 0.0
+        for img_file in (lot2_image_files or []):
+            raw = img_file.getvalue()  # BytesIO-like, ne consomme pas le curseur
+            est = estimate_image_cost(raw)
+            lot2_img_total += est["total_cost_usd"]
+            preview_rows.append({
+                "Fichier": img_file.name,
+                "Type": "Image (Vision)",
+                "Taille": f"{len(raw)/1024:.1f} Ko",
+                "Appel API": "✅ Oui",
+                "Coût estimé": format_cost(est["total_cost_usd"]),
+            })
+
+        if preview_rows:
+            st.dataframe(
+                pd.DataFrame(preview_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
+            if lot2_img_total > 0:
+                st.info(
+                    f"💰 **Coût images estimé : {format_cost(lot2_img_total)}** "
+                    f"+ coût génération LLM (~{format_cost(0.015)} par rapport)  \n"
+                    f"_(modèle {get_model()})_"
+                )
 
     # -----------------------------------------------------------------------
     # Launch pipeline
