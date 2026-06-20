@@ -76,13 +76,40 @@ class AuditEngine:
 
         return False
 
-    def audit(self, generated_content: str, kpi_dict: dict) -> dict:
+    def _extract_allowed_from_sources(self, *source_texts: str) -> set:
+        """
+        Extrait tous les nombres présents dans les textes sources (PDF contexte,
+        questionnaire brut, etc.) et les retourne comme ensemble de valeurs autorisées.
+        Ces nombres ne sont pas des KPIs mais sont des faits légitimes cités dans le
+        document d'entrée — ils ne doivent pas être marqués comme hallucinations.
+        """
+        allowed = set()
+        for text in source_texts:
+            if not text:
+                continue
+            for value, _ in self._extract_numbers_with_context(text):
+                allowed.add(round(value, 2))
+                allowed.add(round(value, 0))
+                allowed.add(int(value) if value == int(value) else value)
+        return allowed
+
+    def audit(
+        self,
+        generated_content: str,
+        kpi_dict: dict,
+        context_text: str = "",
+        questionnaire_raw_text: str = "",
+    ) -> dict:
         """
         Audit generated narrative against computed KPI values.
 
         Args:
-            generated_content: LLM-generated text to audit.
-            kpi_dict: Dict of kpi_id -> KPI entry (from KPIEngine.compute_all()).
+            generated_content:      LLM-generated text to audit.
+            kpi_dict:               Dict of kpi_id -> KPI entry (from KPIEngine).
+            context_text:           Raw text from the context PDF (optional).
+                                    Numbers found here are whitelisted — they are
+                                    legitimate source facts, not hallucinations.
+            questionnaire_raw_text: Raw questionnaire text (optional, same logic).
 
         Returns:
             {
@@ -90,12 +117,7 @@ class AuditEngine:
                 "score_pct": float,
                 "total_numbers_found": int,
                 "validated": int,
-                "rejected": [
-                    {
-                        "number": float,
-                        "context": str
-                    }
-                ],
+                "rejected": [...],
                 "message": str
             }
         """
@@ -108,6 +130,11 @@ class AuditEngine:
                 "rejected": [],
                 "message": "Aucun contenu à auditer.",
             }
+
+        # Nombres présents dans les documents sources → autorisés sans vérification KPI
+        source_whitelist = self._extract_allowed_from_sources(
+            context_text, questionnaire_raw_text
+        )
 
         extracted = self._extract_numbers_with_context(generated_content)
 
@@ -149,7 +176,13 @@ class AuditEngine:
         rejected_list = []
 
         for number, context in non_trivial:
-            if self._is_number_valid(number, kpi_dict):
+            # 1. Vérifie d'abord si le nombre vient d'une source légitime (PDF contexte, questionnaire)
+            in_whitelist = (
+                round(number, 2) in source_whitelist
+                or round(number, 0) in source_whitelist
+                or (int(number) if number == int(number) else number) in source_whitelist
+            )
+            if in_whitelist or self._is_number_valid(number, kpi_dict):
                 validated_count += 1
             else:
                 rejected_list.append({"number": number, "context": context})

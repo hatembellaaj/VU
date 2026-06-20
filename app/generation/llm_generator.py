@@ -319,20 +319,24 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
         methodology: str,
         pharmacy_name: str = "",
         context_text: str = "",
+        image_results: list = None,
     ) -> list:
         """
         Generate all slides for the "Performance Globale" section (Part 2).
 
         Args:
-            kpi_dict: Computed KPIs from KPIEngine.
-            methodology: Methodology text from Lot 1.
+            kpi_dict:      Computed KPIs from KPIEngine.
+            methodology:   Methodology text from Lot 1.
             pharmacy_name: Name of the pharmacy.
-            context_text: Raw text extracted from the context PDF (optional).
-                          If provided, generates an extra intro slide PG_00_CONTEXTE.
+            context_text:  Raw text extracted from the context PDF (optional).
+                           If provided, generates an extra intro slide PG_00_CONTEXTE.
+            image_results: List of image extraction results (for age pyramid chart).
 
         Returns:
             List of slide content dicts (PG_00 first if context provided).
         """
+        from generation.chart_builder import build_chart_for_slide
+
         slides = []
         for slide_def in PERFORMANCE_GLOBALE_SLIDES:
 
@@ -362,6 +366,7 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
                         "contenu":       parsed.get("contenu", ""),
                         "chiffres_cites": [],
                         "sources":       parsed.get("sources", ["Document de contexte PDF"]),
+                        "chart_data":    None,   # slide contexte → pas de graphique
                         "erreur":        None,
                     })
                 except Exception as exc:
@@ -371,6 +376,7 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
                         "contenu":       "",
                         "chiffres_cites": [],
                         "sources":       [],
+                        "chart_data":    None,
                         "erreur":        f"Erreur slide contexte: {exc}",
                     })
                 continue
@@ -384,6 +390,12 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
                 slide_title=slide_def["titre_defaut"],
                 pharmacy_name=pharmacy_name,
                 required_kpi_ids=slide_def.get("kpis_requis"),
+            )
+            # Ajoute la spec de graphique (déterministique depuis les KPIs)
+            result["chart_data"] = build_chart_for_slide(
+                slide_id=slide_def["slide_id"],
+                kpi_dict=kpi_dict,
+                image_results=image_results,
             )
             slides.append(result)
 

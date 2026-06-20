@@ -1323,6 +1323,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                         methodology=methodology,
                         pharmacy_name=pharmacy_name,
                         context_text=st.session_state.get("lot2_context_text", ""),
+                        image_results=st.session_state.get("lot1_image_results", []),
                     )
                     st.session_state["lot2_slides"] = slides
 
@@ -1374,7 +1375,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                 )
 
                 try:
-                    audit_report = audit_engine.audit(all_content, kpis)
+                    audit_report = audit_engine.audit(
+                    all_content,
+                    kpis,
+                    context_text=st.session_state.get("lot2_context_text", ""),
+                )
                     st.session_state["lot2_audit"] = audit_report
 
                     # Display audit metrics
