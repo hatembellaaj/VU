@@ -25,6 +25,7 @@ from generation.llm_generator import LLMGenerator
 from pptx_builder.assembler import PPTXAssembler
 from utils.cost_estimator import estimate_excel_info, estimate_image_cost, format_cost
 from utils import project_manager as pm
+from utils import methodology_library as ml
 
 # ---------------------------------------------------------------------------
 # Page configuration
@@ -586,140 +587,287 @@ if page == "🔬 Lot 1 — Analyse des exemples":
 elif page == "📋 Méthodologie":
     st.title("📋 Méthodologie Agence VU")
 
-    st.info(
-        """
-        **Comment ça marche ?**
+    # Clés session pour la page
+    if "methodo_active_id"   not in st.session_state: st.session_state["methodo_active_id"]   = None
+    if "methodo_rename_id"   not in st.session_state: st.session_state["methodo_rename_id"]   = None
+    if "methodo_confirm_del" not in st.session_state: st.session_state["methodo_confirm_del"] = None
 
-        1. **Lot 1** : chargez un PPTX exemple (présentation réelle Agence VU)
-        2. **Ici** : cliquez sur "🤖 Générer la méthodologie" — Claude analyse les slides
-           et induit automatiquement les règles de transformation
-        3. Relisez, ajustez si besoin, puis **sauvegardez**
-        4. La méthodologie sauvegardée est réutilisée pour tous les projets futurs (Lot 2)
-        """
-    )
-
-    # ── Chargement initial ────────────────────────────────────────────────────
+    # Chargement initial depuis fichier global (rétrocompat)
     if not st.session_state["methodology_text"]:
         st.session_state["methodology_text"] = load_methodology()
 
-    # ── État du PPTX exemple ─────────────────────────────────────────────────
-    pptx_texts = st.session_state.get("lot1_pptx_texts", {})
-    n_slides   = len(pptx_texts)
+    methodo_list = ml.list_methodologies()
 
-    col_status, col_action = st.columns([2, 1])
+    # ===========================================================================
+    # BLOC 1 — Bibliothèque de méthodologies
+    # ===========================================================================
+    st.markdown("### 📚 Bibliothèque de méthodologies")
 
-    with col_status:
-        if n_slides:
-            st.success(f"✅ PPTX exemple chargé — **{n_slides} diapositives** disponibles pour l'analyse")
-        else:
-            st.warning(
-                "⚠️ Aucun PPTX exemple chargé. "
-                "Importez un fichier `.pptx` dans **Lot 1 → Section PPTX** pour activer la génération automatique."
-            )
+    if not methodo_list:
+        st.info("Aucune méthodologie sauvegardée. Générez-en une depuis le PPTX exemple ci-dessous.")
+    else:
+        # ── Sélecteur ────────────────────────────────────────────────────────
+        options_ids   = [m["id"]  for m in methodo_list]
+        options_labels= [ml.summary_line(m) for m in methodo_list]
 
-    # ── Estimation coût + bouton Générer ─────────────────────────────────────
-    with col_action:
-        can_generate = n_slides > 0 and api_key_is_set()
+        current_idx = 0
+        if st.session_state["methodo_active_id"] in options_ids:
+            current_idx = options_ids.index(st.session_state["methodo_active_id"])
 
-        if not api_key_is_set():
-            st.error("Clé API manquante")
-        elif n_slides == 0:
-            st.button("🤖 Générer la méthodologie", disabled=True)
-        else:
-            from generation.methodology_generator import MethodologyGenerator
-            _mg_tmp = MethodologyGenerator(api_key=get_api_key(), model=get_model())
-            est = _mg_tmp.estimate_cost(pptx_texts)
+        sel_idx = st.selectbox(
+            "Sélectionner une méthodologie",
+            options=range(len(options_ids)),
+            format_func=lambda i: options_labels[i],
+            index=current_idx,
+            key="methodo_selector",
+        )
+        sel_id = options_ids[sel_idx]
 
-            st.caption(
-                f"Estimation : ~{est['slides_selected']}/{est['slides_total']} slides sélectionnées  \n"
-                f"~{est['input_tokens']:,} tokens entrée  \n"
-                f"Coût estimé : **${est['total_cost_usd']:.4f}**"
-            )
-
-            if st.button("🤖 Générer la méthodologie", type="primary", use_container_width=True):
-                with st.spinner("Claude analyse le PPTX exemple et induit la méthodologie…"):
-                    try:
-                        mg = MethodologyGenerator(api_key=get_api_key(), model=get_model())
-                        generated = mg.generate(pptx_texts)
-                        st.session_state["methodology_text"] = generated
-                        # Auto-save fichier global
-                        save_methodology(generated)
-                        # Auto-save projet actif
-                        pid = st.session_state.get("current_project_id")
-                        if pid:
-                            pm.save_methodology(pid, generated)
-                        st.success("✅ Méthodologie générée et sauvegardée !")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(f"Erreur lors de la génération : {exc}")
-
-    st.markdown("---")
-
-    # ── Éditeur ───────────────────────────────────────────────────────────────
-    st.markdown("### ✏️ Méthodologie (éditable)")
-
-    methodology_content = st.text_area(
-        "Contenu de la méthodologie",
-        value=st.session_state["methodology_text"],
-        height=600,
-        placeholder=(
-            "La méthodologie sera générée automatiquement depuis le PPTX exemple.\n\n"
-            "Vous pouvez aussi la saisir ou la modifier manuellement ici."
-        ),
-        key="methodology_textarea",
-    )
-
-    # ── Actions ───────────────────────────────────────────────────────────────
-    action_cols = st.columns([2, 2, 2, 3])
-
-    with action_cols[0]:
-        if st.button("💾 Sauvegarder", type="primary", use_container_width=True):
-            st.session_state["methodology_text"] = methodology_content
-            if save_methodology(methodology_content):
-                pid = st.session_state.get("current_project_id")
-                if pid:
-                    pm.save_methodology(pid, methodology_content)
-                st.success("✅ Sauvegardée")
-
-    with action_cols[1]:
-        if st.button("🔄 Recharger", use_container_width=True):
-            loaded = load_methodology()
-            st.session_state["methodology_text"] = loaded
-            st.rerun()
-
-    with action_cols[2]:
-        if methodology_content:
+        col_load, col_dup, col_dl, _ = st.columns([2, 2, 2, 3])
+        with col_load:
+            if st.button("📂 Charger dans l'éditeur", type="primary", use_container_width=True):
+                content = ml.get_content(sel_id)
+                st.session_state["methodology_text"]  = content
+                st.session_state["methodo_active_id"] = sel_id
+                st.rerun()
+        with col_dup:
+            if st.button("📋 Dupliquer", use_container_width=True):
+                src = next((m for m in methodo_list if m["id"] == sel_id), None)
+                if src:
+                    ml.duplicate_methodology(sel_id, f"Copie — {src['nom']}")
+                    st.rerun()
+        with col_dl:
+            content_dl = ml.get_content(sel_id)
+            nom_dl = next((m["nom"] for m in methodo_list if m["id"] == sel_id), sel_id)
             st.download_button(
-                label="📥 Télécharger (.md)",
-                data=methodology_content.encode("utf-8"),
-                file_name="methodologie_agence_vu.md",
+                "📥 Télécharger",
+                data=content_dl.encode("utf-8"),
+                file_name=f"{sel_id}.md",
                 mime="text/markdown",
                 use_container_width=True,
             )
 
-    with action_cols[3]:
-        methodo_upload = st.file_uploader(
-            "📤 Importer une méthodologie (.md / .txt)",
-            type=["md", "txt"],
-            key="methodo_import_uploader",
-            label_visibility="collapsed",
-        )
-        if methodo_upload:
+        st.markdown("---")
+
+        # ── Tableau de gestion ───────────────────────────────────────────────
+        with st.expander("🗂️ Gérer toutes les méthodologies", expanded=False):
+            for m in methodo_list:
+                is_active = (m["id"] == st.session_state.get("methodo_active_id"))
+                badge = " 🟢 **[active]**" if is_active else ""
+                st.markdown(f"**{m['nom']}**{badge} — {m.get('word_count',0)} mots — modifié le {m.get('date_modification','')[:10]}")
+                if m.get("description"):
+                    st.caption(m["description"])
+                if m.get("source_pptx"):
+                    st.caption(f"Source PPTX : {m['source_pptx']}")
+
+                c1, c2, c3, c4 = st.columns([2, 2, 2, 5])
+                with c1:
+                    if st.button("📂 Charger", key=f"load_{m['id']}", use_container_width=True):
+                        content = ml.get_content(m["id"])
+                        st.session_state["methodology_text"]  = content
+                        st.session_state["methodo_active_id"] = m["id"]
+                        st.rerun()
+                with c2:
+                    if st.button("✏️ Renommer", key=f"ren_{m['id']}", use_container_width=True):
+                        st.session_state["methodo_rename_id"] = m["id"]
+                with c3:
+                    if st.button("🗑️ Supprimer", key=f"del_{m['id']}", use_container_width=True):
+                        st.session_state["methodo_confirm_del"] = m["id"]
+
+                # Renommer inline
+                if st.session_state["methodo_rename_id"] == m["id"]:
+                    new_name = st.text_input("Nouveau nom", value=m["nom"], key=f"rename_input_{m['id']}")
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        if st.button("✅ Valider", key=f"rename_ok_{m['id']}"):
+                            ml.rename_methodology(m["id"], new_name)
+                            st.session_state["methodo_rename_id"] = None
+                            st.rerun()
+                    with rc2:
+                        if st.button("❌ Annuler", key=f"rename_cancel_{m['id']}"):
+                            st.session_state["methodo_rename_id"] = None
+                            st.rerun()
+
+                # Confirmation suppression
+                if st.session_state["methodo_confirm_del"] == m["id"]:
+                    st.warning(f"Supprimer définitivement « {m['nom']} » ?")
+                    dc1, dc2 = st.columns(2)
+                    with dc1:
+                        if st.button("✅ Oui, supprimer", key=f"del_ok_{m['id']}"):
+                            ml.delete_methodology(m["id"])
+                            if st.session_state["methodo_active_id"] == m["id"]:
+                                st.session_state["methodo_active_id"] = None
+                                st.session_state["methodology_text"]  = ""
+                            st.session_state["methodo_confirm_del"] = None
+                            st.rerun()
+                    with dc2:
+                        if st.button("❌ Annuler", key=f"del_cancel_{m['id']}"):
+                            st.session_state["methodo_confirm_del"] = None
+                            st.rerun()
+
+                st.markdown("---")
+
+    # ── Import externe ────────────────────────────────────────────────────────
+    with st.expander("📤 Importer une méthodologie (.md / .txt)"):
+        imp_col1, imp_col2 = st.columns([3, 2])
+        with imp_col1:
+            methodo_upload = st.file_uploader(
+                "Fichier Markdown ou texte",
+                type=["md", "txt"],
+                key="methodo_import_uploader",
+                label_visibility="collapsed",
+            )
+        with imp_col2:
+            import_nom = st.text_input("Nom à donner", placeholder="Ex: Benchmark 2025", key="import_nom")
+
+        if methodo_upload and st.button("📥 Importer et sauvegarder", type="primary"):
             imported = methodo_upload.read().decode("utf-8")
-            st.session_state["methodology_text"] = imported
-            save_methodology(imported)
-            pid = st.session_state.get("current_project_id")
-            if pid:
-                pm.save_methodology(pid, imported)
-            st.success("✅ Méthodologie importée et sauvegardée")
+            nom = import_nom.strip() or methodo_upload.name.rsplit(".", 1)[0]
+            meta = ml.save_methodology(nom=nom, content=imported, source_pptx="import manuel")
+            st.session_state["methodology_text"]  = imported
+            st.session_state["methodo_active_id"] = meta["id"]
+            save_methodology(imported)   # sync fichier global
+            st.success(f"✅ Importée et sauvegardée sous « {nom} »")
             st.rerun()
 
-    # ── Stats + aperçu ────────────────────────────────────────────────────────
-    if methodology_content:
-        word_count = len(methodology_content.split())
-        char_count = len(methodology_content)
-        st.caption(f"📝 {word_count} mots — {char_count} caractères")
+    st.markdown("---")
 
+    # ===========================================================================
+    # BLOC 2 — Génération depuis PPTX
+    # ===========================================================================
+    st.markdown("### 🤖 Générer depuis un PPTX exemple")
+
+    pptx_texts = st.session_state.get("lot1_pptx_texts", {})
+    n_slides   = len(pptx_texts)
+
+    gen_col1, gen_col2 = st.columns([2, 1])
+
+    with gen_col1:
+        if n_slides:
+            st.success(f"✅ PPTX exemple chargé — **{n_slides} diapositives** disponibles")
+        else:
+            st.warning("⚠️ Aucun PPTX chargé. Allez dans **Lot 1 → Section PPTX** pour en importer un.")
+
+        gen_nom = st.text_input(
+            "Nom de la nouvelle méthodologie",
+            placeholder="Ex: Pharmacie urbaine sous-pivot 2025",
+            key="gen_methodo_nom",
+        )
+
+    with gen_col2:
+        if not api_key_is_set():
+            st.error("Clé API manquante")
+        elif n_slides > 0:
+            from generation.methodology_generator import MethodologyGenerator
+            _mg_tmp = MethodologyGenerator(api_key=get_api_key(), model=get_model())
+            est = _mg_tmp.estimate_cost(pptx_texts)
+            st.caption(
+                f"~{est['slides_selected']}/{est['slides_total']} slides sélectionnées  \n"
+                f"~{est['input_tokens']:,} tokens  \n"
+                f"Coût estimé : **${est['total_cost_usd']:.4f}**"
+            )
+
+    if n_slides > 0 and api_key_is_set():
+        if st.button("🤖 Générer la méthodologie", type="primary", use_container_width=True):
+            nom_to_use = gen_nom.strip() or "Méthodologie générée"
+            with st.spinner("Claude analyse le PPTX et induit la méthodologie…"):
+                try:
+                    from generation.methodology_generator import MethodologyGenerator
+                    mg = MethodologyGenerator(api_key=get_api_key(), model=get_model())
+                    generated = mg.generate(pptx_texts)
+
+                    # Sauvegarde dans la bibliothèque
+                    pptx_source = "PPTX chargé en Lot 1"
+                    meta = ml.save_methodology(
+                        nom=nom_to_use,
+                        content=generated,
+                        source_pptx=pptx_source,
+                    )
+                    # Charge dans l'éditeur + projet
+                    st.session_state["methodology_text"]  = generated
+                    st.session_state["methodo_active_id"] = meta["id"]
+                    save_methodology(generated)
+                    pid = st.session_state.get("current_project_id")
+                    if pid:
+                        pm.save_methodology(pid, generated)
+
+                    st.success(f"✅ Méthodologie « {nom_to_use} » générée et sauvegardée dans la bibliothèque !")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Erreur : {exc}")
+
+    st.markdown("---")
+
+    # ===========================================================================
+    # BLOC 3 — Éditeur
+    # ===========================================================================
+    active_nom = ""
+    if st.session_state.get("methodo_active_id"):
+        active_meta = next((m for m in methodo_list if m["id"] == st.session_state["methodo_active_id"]), None)
+        if active_meta:
+            active_nom = active_meta["nom"]
+
+    st.markdown(f"### ✏️ Éditeur{f' — *{active_nom}*' if active_nom else ''}")
+
+    methodology_content = st.text_area(
+        "Contenu de la méthodologie",
+        value=st.session_state["methodology_text"],
+        height=550,
+        placeholder="Chargez une méthodologie depuis la bibliothèque ou générez-en une depuis le PPTX exemple.",
+        key="methodology_textarea",
+    )
+
+    if methodology_content:
+        st.caption(f"📝 {len(methodology_content.split())} mots — {len(methodology_content)} caractères")
+
+    # Sauvegarde
+    save_cols = st.columns([3, 3, 3])
+
+    with save_cols[0]:
+        # Écrase la méthodologie active
+        overwrite_disabled = not (methodology_content and st.session_state.get("methodo_active_id"))
+        if st.button(
+            f"💾 Mettre à jour « {active_nom} »" if active_nom else "💾 Mettre à jour",
+            type="primary",
+            disabled=overwrite_disabled,
+            use_container_width=True,
+        ):
+            ml.save_methodology(
+                nom=active_nom,
+                content=methodology_content,
+                methodo_id=st.session_state["methodo_active_id"],
+            )
+            st.session_state["methodology_text"] = methodology_content
+            save_methodology(methodology_content)
+            pid = st.session_state.get("current_project_id")
+            if pid:
+                pm.save_methodology(pid, methodology_content)
+            st.success("✅ Mise à jour sauvegardée")
+
+    with save_cols[1]:
+        # Sauvegarde sous un nouveau nom
+        new_save_nom = st.text_input("", placeholder="Nouveau nom…", key="save_as_nom", label_visibility="collapsed")
+        if st.button("💾 Sauvegarder sous…", use_container_width=True, disabled=not methodology_content):
+            nom_final = new_save_nom.strip() or "Sans titre"
+            meta = ml.save_methodology(nom=nom_final, content=methodology_content)
+            st.session_state["methodo_active_id"] = meta["id"]
+            save_methodology(methodology_content)
+            st.success(f"✅ Sauvegardée sous « {nom_final} »")
+            st.rerun()
+
+    with save_cols[2]:
+        if methodology_content:
+            fname = f"{st.session_state.get('methodo_active_id', 'methodologie')}.md"
+            st.download_button(
+                "📥 Télécharger (.md)",
+                data=methodology_content.encode("utf-8"),
+                file_name=fname,
+                mime="text/markdown",
+                use_container_width=True,
+            )
+
+    # Aperçu
+    if methodology_content:
         with st.expander("👁️ Aperçu rendu"):
             st.markdown(methodology_content)
 
@@ -1119,12 +1267,18 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     state="complete",
                 )
             else:
-                # Load methodology
-                methodology = st.session_state.get("methodology_text") or load_methodology()
+                # Load methodology — priorité : session > bibliothèque active > fichier global
+                methodology = st.session_state.get("methodology_text", "")
+                if not methodology:
+                    active_mid = st.session_state.get("methodo_active_id")
+                    if active_mid:
+                        methodology = ml.get_content(active_mid)
+                    if not methodology:
+                        methodology = load_methodology()
                 if not methodology:
                     st.warning(
                         "⚠️ Méthodologie non définie — utilisation des instructions par défaut. "
-                        "Allez dans 'Méthodologie' pour personnaliser."
+                        "Allez dans 'Méthodologie' pour en sélectionner ou générer une."
                     )
 
                 try:
