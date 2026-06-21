@@ -99,6 +99,7 @@ class AuditEngine:
         kpi_dict: dict,
         context_text: str = "",
         questionnaire_raw_text: str = "",
+        methodology_text: str = "",
     ) -> dict:
         """
         Audit generated narrative against computed KPI values.
@@ -132,8 +133,10 @@ class AuditEngine:
             }
 
         # Nombres présents dans les documents sources → autorisés sans vérification KPI
+        # La méthodologie contient les benchmarks marché (40,8€, 180 clients/j…)
+        # qui sont des références légitimes, pas des hallucinations
         source_whitelist = self._extract_allowed_from_sources(
-            context_text, questionnaire_raw_text
+            context_text, questionnaire_raw_text, methodology_text
         )
 
         extracted = self._extract_numbers_with_context(generated_content)
@@ -148,15 +151,25 @@ class AuditEngine:
                 "message": "Aucun nombre trouvé dans le contenu généré.",
             }
 
-        # Filter out years (1900-2100) and small ordinals (1-31) since they
-        # are legitimate in narrative text without being KPI values
+        # Nombres suivis de ° dans le texte original (ex: "360°", "45°")
+        # → termes de marque ou degrés, pas des KPIs
+        degree_numbers: set = set()
+        for m in re.finditer(r"(\d[\d\s.,]*)\s*°", generated_content):
+            raw = m.group(1).strip().replace(" ", "").replace(",", ".")
+            try:
+                degree_numbers.add(round(float(raw), 2))
+            except ValueError:
+                pass
+
         def is_trivial(n: float) -> bool:
-            """Years and small integers used as ordinals are not KPI numbers."""
+            """Years, ordinals, and degree-suffixed numbers are not KPI hallucinations."""
+            if round(n, 2) in degree_numbers:
+                return True
             if n == int(n):
                 ni = int(n)
-                if 1900 <= ni <= 2100:  # years
+                if 1900 <= ni <= 2100:  # années
                     return True
-                if 1 <= ni <= 12:  # months
+                if 1 <= ni <= 12:       # mois
                     return True
             return False
 

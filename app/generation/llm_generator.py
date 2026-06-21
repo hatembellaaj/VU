@@ -5,87 +5,172 @@ from typing import Optional
 import anthropic
 
 
-# Slide definitions for the "Performance Globale" section (Part 2)
-# PG_00_CONTEXTE est généré uniquement si un PDF de contexte est fourni
+# ── 12 slides définis par la méthodologie Agence VU ──────────────────────────
+# PG_00_CONTEXTE : généré uniquement si un PDF de contexte est fourni
 PERFORMANCE_GLOBALE_SLIDES = [
     {
         "slide_id": "PG_00_CONTEXTE",
         "titre_defaut": "Contexte & Présentation de l'officine",
         "description": (
-            "Slide d'introduction qui résume le contexte de la pharmacie : "
-            "localisation, historique, positionnement, enjeux identifiés. "
-            "Basé exclusivement sur le document de contexte fourni."
+            "Slide d'introduction : localisation, historique, positionnement, enjeux. "
+            "Basé exclusivement sur le document de contexte PDF fourni. "
+            "Ne cite aucun KPI financier — uniquement des faits contextuels."
         ),
-        "kpis_requis": [],           # pas de KPIs — basé sur le PDF contexte
-        "requires_context": True,    # slide ignorée si pas de PDF contexte
+        "kpis_requis": [],
+        "requires_context": True,
     },
     {
-        "slide_id": "PG_01_INTRO",
-        "titre_defaut": "Performance Globale — Vue d'ensemble",
+        "slide_id": "PG_01_SECTION",
+        "titre_defaut": "Performances Globales",
         "description": (
-            "Introduction synthétique de la performance de la pharmacie. "
-            "Présente les indicateurs clés et le positionnement général."
+            "Page de section introductive. Annonce que les analyses s'appuient sur des "
+            "données marché consolidées : IQVIA, GERS data, OFFISANTÉ, Fiducial Conseil, "
+            "KPMG Santé. Slide de transition — pas de chiffres officine, ton institutionnel."
         ),
-        "kpis_requis": ["ca_total", "evolution_ca_pct", "panier_moyen"],
+        "kpis_requis": [],
     },
     {
-        "slide_id": "PG_02_CA",
-        "titre_defaut": "Analyse du Chiffre d'Affaires",
+        "slide_id": "PG_02_PROFIL_TYPE",
+        "titre_defaut": "PROFIL-TYPE & Profil de votre officine",
         "description": (
-            "Analyse détaillée du chiffre d'affaires: total, évolution, "
-            "répartition par famille de produits."
+            "Profil-type de l'officine : "
+            "(1) type officine (urbain/périurbain/rural) d'après localisation, "
+            "(2) part des ordonnances (TVA 2,1%) — si ≥ 70% → 'part ordonnances très élevée', "
+            "(3) top 2-3 univers hors ordonnances par marge, "
+            "(4) expertises potentielles détectées (ortho, MAD, naturo…). "
+            "Structure : 4 points courts, 1 phrase chacun."
+        ),
+        "kpis_requis": ["part_ordonnances_pct", "ca_total"],
+    },
+    {
+        "slide_id": "PG_03_PROFIL_PATIENTS",
+        "titre_defaut": "Le PROFIL de vos patients",
+        "description": (
+            "Pyramide des âges officine vs benchmark local/national. "
+            "Calculer la part des 60+ (cumul tranches) — si > 55% → 'profil très séniorisé'. "
+            "Identifier la tranche sur-représentée et la tranche sous-représentée. "
+            "Conclure par 1 implication stratégique (ex: 'peu de familles, peu d'actifs'). "
+            "Si pas de données pyramide disponibles, décrire le profil depuis les données commerciales."
+        ),
+        "kpis_requis": [],
+    },
+    {
+        "slide_id": "PG_04_FINANCIERS",
+        "titre_defaut": "Les indicateurs FINANCIERS",
+        "description": (
+            "CA HT et marge brute avec évolution N-1 vs N. CA/ETP et Marge/ETP positionnés : "
+            "< 90k€ faible | 90-105k€ correct | 105-120k€ performant | > 120k€ excellent. "
+            "Alerte si médicaments chers (TVA 2,1% élevée) masquent la marge réelle. "
+            "Benchmark CA/ETP marché : 350-380k€ | Marge brute : 400-540k€ / 27%. "
+            "Utilise UNIQUEMENT les KPIs fournis."
         ),
         "kpis_requis": [
-            "ca_total",
-            "evolution_ca_pct",
-            "part_ordonnances_pct",
-            "part_parapharmacie_pct",
+            "ca_total", "evolution_ca_pct",
+            "marge_brute", "evolution_marge_pct",
+            "ca_par_etp", "marge_par_etp",
         ],
     },
     {
-        "slide_id": "PG_03_CLIENTELE",
-        "titre_defaut": "Analyse de la Clientèle",
+        "slide_id": "PG_05_COMMERCIAUX",
+        "titre_defaut": "Les indicateurs COMMERCIAUX",
         "description": (
-            "Profil et comportement de la clientèle: nombre de clients actifs, "
-            "fréquentation, fidélisation."
+            "Fréquentation (clients/jour) vs benchmark marché 180 clients/j. "
+            "Panier moyen total vs benchmark 40,8€ — panier ordonnances vs 58,3€ — "
+            "panier conseil vs 13,89€. "
+            "Si fréquentation < 60% de la moyenne → 'fort levier de croissance par le flux'. "
+            "Si panier conseil sous la moyenne → 'conseil associé non systématisé'. "
+            "Identifier 1-2 leviers prioritaires."
         ),
         "kpis_requis": [
-            "nb_clients_actifs",
-            "frequentation_mensuelle",
-            "taux_fidelisation",
-            "panier_moyen",
+            "frequentation_j", "panier_moyen",
+            "panier_ordonnances", "panier_conseil",
         ],
     },
     {
-        "slide_id": "PG_04_PANIER",
-        "titre_defaut": "Évolution du Panier Moyen",
+        "slide_id": "PG_06_UNIVERS_CA",
+        "titre_defaut": "Les UNIVERS — CA et marge HT hors ordos",
         "description": (
-            "Analyse du panier moyen et de son évolution. "
-            "Opportunités d'amélioration du panier."
+            "Répartition CA% et Marge% par univers hors ordonnances "
+            "(JAMBES, SÉNIOR, NATURE, LIBRE ACCÈS, HYGIÈNE, BÉBÉ, BEAUTÉ, VÉTO). "
+            "Identifier piliers de marge (top 2 ≥ 15% marge chacun), relais (10-15%), "
+            "univers para sur-exposés/sous-rentables. "
+            "Mentionner la part ordonnances vs hors ordos dans le CA total."
         ),
-        "kpis_requis": ["panier_moyen", "evolution_panier_pct", "nb_clients_actifs"],
+        "kpis_requis": ["part_ordonnances_pct", "ca_total"],
     },
     {
-        "slide_id": "PG_05_SAISONNALITE",
-        "titre_defaut": "Saisonnalité et Tendances",
+        "slide_id": "PG_07_UNIVERS_EVO",
+        "titre_defaut": "Les UNIVERS — Évolutions CA et marge",
         "description": (
-            "Analyse de la saisonnalité des ventes et identification "
-            "des périodes clés de l'année."
+            "Évolution CA% et marge% par univers hors ordos N vs N-1. "
+            "Moteur de croissance principal (ordonnances ou hors ordos + chiffre %). "
+            "Univers en croissance hors ordos (liste + %). "
+            "Univers qui décrochent (CA < -10%) → qualifier 'levier manqué'. "
+            "Conclusion : le hors ordos est-il un levier ou un frein ?"
         ),
-        "kpis_requis": ["indice_saisonnalite", "frequentation_mensuelle", "ca_total"],
+        "kpis_requis": ["evolution_ca_pct", "evolution_marge_pct"],
     },
     {
-        "slide_id": "PG_06_SYNTHESE",
-        "titre_defaut": "Synthèse et Recommandations",
+        "slide_id": "PG_08_TOP_MARQUES",
+        "titre_defaut": "Les UNIVERS — TOP 10 des marques par marge HT",
         "description": (
-            "Synthèse des forces et axes d'amélioration identifiés. "
-            "Recommandations prioritaires pour la pharmacie."
+            "Top 10 marques hors ordonnances par marge HT. "
+            "Part cumulée du top 10 dans la marge totale hors ordos. "
+            "Si top 10 > 35% → 'portefeuille à concentrer pour gagner en puissance'. "
+            "Source : ventes OSPHARM × catégorisation BCB VU. "
+            "Recommandation 1 phrase."
+        ),
+        "kpis_requis": [],
+    },
+    {
+        "slide_id": "PG_09_MERCH_EXPO",
+        "titre_defaut": "Les indicateurs MERCHANDISING — Exposition",
+        "description": (
+            "Ratio exposition (linéaire%) vs marge% par univers. "
+            "Sous-exposé (rouge) : marge >> exposition. "
+            "Sur-exposé (orange) : exposition >> marge → immobilisent stocks/trésorerie. "
+            "Signal spécifique si univers signature dispersé (NATURE, herboristerie…). "
+            "3 bullets max : piliers sous-exposés | univers sur-exposés | cas particulier."
+        ),
+        "kpis_requis": [],
+    },
+    {
+        "slide_id": "PG_10_MERCH_STOCKS",
+        "titre_defaut": "Les indicateurs MERCHANDISING — Stocks",
+        "description": (
+            "Rotation stocks (jours) par univers. "
+            "Benchmark : ordonnances 30-40j | hors ordos 80-100j. "
+            "Global hors ordos > 100j → 'rotation élevée' (alerte). "
+            "Identifier univers cohérents (45-80j) et univers > 150j → 'trésorerie dormante'. "
+            "Conclure : 'pilotez vos stocks par univers'."
+        ),
+        "kpis_requis": [],
+    },
+    {
+        "slide_id": "PG_11_MERCH_SIGNA",
+        "titre_defaut": "Les indicateurs MERCHANDISING — Signalétique",
+        "description": (
+            "Identité visuelle : logo existant et différenciant → valoriser et recommander de décliner. "
+            "Ce qui manque : balisage univers, cohérence charte graphique. "
+            "Recommandation liée au projet de transfert/aménagement si mentionné. "
+            "3 bullets : constat identité | ce qui manque | recommandation projet."
+        ),
+        "kpis_requis": [],
+    },
+    {
+        "slide_id": "PG_12_SYNTHESE",
+        "titre_defaut": "En Synthèse — Votre SWOT",
+        "description": (
+            "SWOT en 4 quadrants, 2-3 bullets max par quadrant. "
+            "Forces : ce qui est au-dessus des benchmarks marché. "
+            "Faiblesses : ce qui est en dessous ou déséquilibré. "
+            "Opportunités : leviers identifiés (flux, conseil, univers sous-exposés). "
+            "Menaces : dépendances (médicaments chers, séniorisation, univers décrochants). "
+            "Utilise les KPIs et les constats des slides précédents."
         ),
         "kpis_requis": [
-            "ca_total",
-            "evolution_ca_pct",
-            "taux_fidelisation",
-            "panier_moyen",
+            "ca_total", "evolution_ca_pct",
+            "marge_brute", "panier_moyen", "frequentation_j",
         ],
     },
 ]

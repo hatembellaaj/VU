@@ -1379,6 +1379,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     all_content,
                     kpis,
                     context_text=st.session_state.get("lot2_context_text", ""),
+                    methodology_text=st.session_state.get("methodology_text", ""),
                 )
                     st.session_state["lot2_audit"] = audit_report
 

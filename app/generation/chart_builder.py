@@ -1,323 +1,454 @@
 """
-Générateur de spécifications de graphiques pour Agence VU.
+Générateur de spécifications de graphiques — Agence VU.
 
-Chaque slide peut recevoir un graphique construit DÉTERMINISTIQUEMENT
-depuis les KPIs calculés et les données images extraites.
-Les graphiques sont définis dans la méthodologie :
-
-  Slide Profil patients   → bar chart pyramide des âges officine vs référence
-  Slide Financiers        → column chart CA/marge N-1 vs N + position Marge/ETP
-  Slide Commerciaux       → grouped bar fréquentation + paniers vs benchmarks
-  Slide Univers CA/marge  → horizontal bar répartition par univers
-  Slide Univers évolution → column chart évolution % par univers
-  Slide Merchandising expo→ grouped bar exposition% vs marge% par univers
-  Slide Merchandising stock→ horizontal bar jours de stock par univers
+Chaque slide de la section Performance Globale a son propre graphique,
+construit DÉTERMINISTIQUEMENT depuis les KPIs et données images.
+Retourne None si les données sont insuffisantes (→ slide sans graphique).
 
 Spec retournée :
 {
-  "type":       "bar" | "column" | "line" | "pie",
-  "title":      str,
-  "categories": [str, ...],
+  "type":         "bar" | "column" | "line" | "pie",
+  "title":        str,
+  "categories":   [str, ...],
   "series": [
-    {"name": str, "values": [float, ...], "color": "#RRGGBB" (optionnel)}
+    {"name": str, "values": [float, ...], "color": "#RRGGBB"}
   ],
-  "value_format": "%" | "€" | "j" | None,
-  "show_benchmark_line": float | None   # valeur de la ligne de référence marché
+  "value_format": "%" | "€" | "j" | "k€" | None
 }
 """
-
 from typing import Optional
 
-# ── Couleurs Agence VU ────────────────────────────────────────────────────────
+# ── Palette Agence VU ─────────────────────────────────────────────────────────
 VU_BLUE   = "#008BD2"
 VU_NAVY   = "#1A2E4A"
 VU_GREEN  = "#27AE60"
 VU_ORANGE = "#F39C12"
 VU_RED    = "#E74C3C"
-VU_GREY   = "#BDC3C7"
-VU_LIGHT  = "#D6EAF8"
+VU_GREY   = "#95A5A6"
+VU_LIGHT  = "#BDC3C7"
 
-# Benchmarks marché (source: méthodologie Agence VU 2025)
-BENCHMARK = {
-    "frequentation_j":    180.0,
-    "panier_total":        40.8,
-    "panier_ordos":        58.3,
-    "panier_conseil":      13.89,
-    "marge_etp_faible":    90_000,
-    "marge_etp_correct":  105_000,
-    "marge_etp_performant":120_000,
-    "rotation_ordos_min":  30,
-    "rotation_ordos_max":  40,
-    "rotation_hors_min":   80,
-    "rotation_hors_max":  100,
+# ── Benchmarks marché 2025 (méthodologie Agence VU) ───────────────────────────
+BM = {
+    "frequentation_j":     180.0,
+    "panier_total":         40.8,
+    "panier_ordos":         58.3,
+    "panier_conseil":       13.89,
+    "marge_etp_faible":     90_000,
+    "marge_etp_correct":   105_000,
+    "marge_etp_perf":      120_000,
+    "rotation_ordos":       35.0,   # milieu de 30-40j
+    "rotation_hors":        90.0,   # milieu de 80-100j
 }
 
 
-def _kv(kpi_dict: dict, key: str, default=None):
-    """Récupère la valeur d'un KPI."""
-    entry = kpi_dict.get(key, {})
-    if isinstance(entry, dict):
-        return entry.get("valeur", default)
+def _v(kpi_dict: dict, *keys, default=None):
+    """Retourne la première valeur KPI non-nulle parmi les clés candidates."""
+    for k in keys:
+        entry = kpi_dict.get(k, {})
+        val = entry.get("valeur") if isinstance(entry, dict) else None
+        if val is not None:
+            return val
     return default
 
 
-# ── Builders par slide ────────────────────────────────────────────────────────
+def _label(kpi_dict: dict, key: str, fallback: str) -> str:
+    entry = kpi_dict.get(key, {})
+    return entry.get("label_fr", fallback) if isinstance(entry, dict) else fallback
 
-def _chart_financiers(kpi_dict: dict) -> Optional[dict]:
-    """
-    Column chart : CA et Marge Brute — Évolution N-1 → N.
-    Nécessite : ca_total + evolution_ca_pct OU ca_n1 + marge_brute + marge_n1.
-    """
-    ca_n    = _kv(kpi_dict, "ca_total")
-    marge_n = _kv(kpi_dict, "marge_brute")
-    evo_ca  = _kv(kpi_dict, "evolution_ca_pct")
-    evo_mg  = _kv(kpi_dict, "evolution_marge_pct")
 
-    if ca_n is None or marge_n is None:
+# ── PG_01_SECTION — aucun graphique ──────────────────────────────────────────
+
+# ── PG_02_PROFIL_TYPE — camembert TVA / hors ordos ───────────────────────────
+
+def _chart_profil_type(kpi_dict: dict, **_) -> Optional[dict]:
+    """Pie : part ordonnances vs hors ordonnances dans le CA."""
+    pct = _v(kpi_dict, "part_ordonnances_pct", "part_tva_2_1_pct")
+    if pct is None:
         return None
-
-    # Reconstitue N-1 si évolution disponible
-    if evo_ca is not None:
-        ca_n1 = round(ca_n / (1 + evo_ca / 100), 0)
-    else:
-        ca_n1 = None
-
-    if evo_mg is not None:
-        marge_n1 = round(marge_n / (1 + evo_mg / 100), 0)
-    else:
-        marge_n1 = None
-
-    if ca_n1 is not None and marge_n1 is not None:
-        categories = ["N-1", "N"]
-        ca_vals    = [ca_n1, ca_n]
-        marge_vals = [marge_n1, marge_n]
-    else:
-        categories = ["N"]
-        ca_vals    = [ca_n]
-        marge_vals = [marge_n]
-
+    # Normalise : si valeur > 1 c'est déjà un %, sinon multiplie par 100
+    if pct <= 1:
+        pct = pct * 100
+    hors = round(100 - pct, 1)
+    pct  = round(pct, 1)
     return {
-        "type":         "column",
-        "title":        "CA et Marge Brute HT",
-        "categories":   categories,
-        "series": [
-            {"name": "Chiffre d'Affaires HT", "values": ca_vals,    "color": VU_NAVY},
-            {"name": "Marge Brute HT",        "values": marge_vals, "color": VU_BLUE},
-        ],
-        "value_format": "€",
-        "show_benchmark_line": None,
+        "type":         "pie",
+        "title":        "Répartition CA — Ordonnances vs Hors ordonnances",
+        "categories":   ["Ordonnances (TVA 2,1%)", "Hors ordonnances"],
+        "series": [{"name": "CA", "values": [pct, hors], "color": VU_NAVY}],
+        "value_format": "%",
     }
 
 
-def _chart_commerciaux(kpi_dict: dict) -> Optional[dict]:
+# ── PG_03_PROFIL_PATIENTS — pyramide des âges ────────────────────────────────
+
+def _chart_profil_patients(kpi_dict: dict, image_results: list = None, **_) -> Optional[dict]:
     """
-    Grouped bar : officine vs benchmark — Fréquentation et paniers moyens.
+    Horizontal bar : % par tranche d'âge officine vs référence.
+    Construit depuis les valeurs extraites des images si disponibles.
     """
-    freq = _kv(kpi_dict, "frequentation_j") or _kv(kpi_dict, "nb_clients_actifs")
-    panier = _kv(kpi_dict, "panier_moyen")
-
-    if freq is None and panier is None:
-        return None
-
-    categories = []
-    officine_vals = []
-    benchmark_vals = []
-
-    if freq is not None:
-        categories.append("Fréquentation\n(clients/jour)")
-        officine_vals.append(round(freq, 1))
-        benchmark_vals.append(BENCHMARK["frequentation_j"])
-
-    if panier is not None:
-        categories.append("Panier moyen\ntotal (€)")
-        officine_vals.append(round(panier, 2))
-        benchmark_vals.append(BENCHMARK["panier_total"])
-
-    panier_conseil = _kv(kpi_dict, "panier_conseil")
-    if panier_conseil is not None:
-        categories.append("Panier moyen\nconseil (€)")
-        officine_vals.append(round(panier_conseil, 2))
-        benchmark_vals.append(BENCHMARK["panier_conseil"])
-
-    return {
-        "type":       "bar",
-        "title":      "Indicateurs commerciaux vs marché",
-        "categories": categories,
-        "series": [
-            {"name": "Votre officine", "values": officine_vals,  "color": VU_BLUE},
-            {"name": "Benchmark marché 2025", "values": benchmark_vals, "color": VU_GREY},
-        ],
-        "value_format": None,
-        "show_benchmark_line": None,
-    }
-
-
-def _chart_clientele(kpi_dict: dict, image_results: list = None) -> Optional[dict]:
-    """
-    Bar chart horizontal : Profil patients par tranche d'âge.
-    Si les données image contiennent une pyramide des âges, on l'utilise.
-    Sinon on affiche fréquentation + taux de fidélisation vs benchmarks.
-    """
-    # Tentative de reconstruction depuis les données images extraites
+    # Tentative extraction pyramide depuis images
     if image_results:
-        age_data = _extract_age_pyramid(image_results)
-        if age_data:
-            return age_data
-
-    # Fallback : fréquentation + paniers si disponibles
-    return _chart_commerciaux(kpi_dict)
+        result = _extract_age_pyramid(image_results)
+        if result:
+            return result
+    # Fallback — pas de données âge disponibles
+    return None
 
 
 def _extract_age_pyramid(image_results: list) -> Optional[dict]:
-    """
-    Tente d'extraire une pyramide des âges depuis les valeurs images.
-    Cherche des labels contenant des tranches d'âge (ex: "0-4", "5-14", "65+").
-    """
-    age_keywords = ["ans", "age", "âge", "tranche", "-", "+"]
-    officine_vals = {}
-    ref_vals = {}
-
-    for img_result in (image_results or []):
-        for entry in img_result.get("valeurs_extraites", []):
-            label = str(entry.get("label", "")).lower()
-            valeur = entry.get("valeur")
-            if valeur is None:
+    AGE_PATTERNS = ["0-4", "5-14", "5-9", "10-14", "15-24", "15-19", "20-24",
+                    "25-34", "35-44", "45-54", "55-64", "65-74", "75-84",
+                    "80+", "85+", "65+", "60+", "ans", "age", "âge"]
+    officine, ref = {}, {}
+    for img in (image_results or []):
+        for entry in img.get("valeurs_extraites", []):
+            label = str(entry.get("label", "")).lower().strip()
+            val   = entry.get("valeur")
+            if val is None:
                 continue
-            # Détecte les labels de tranche d'âge
-            is_age = any(kw in label for kw in age_keywords) or (
-                any(c.isdigit() for c in label) and (
-                    "+" in label or "-" in label or "ans" in label
-                )
-            )
+            is_age = any(p in label for p in AGE_PATTERNS)
             if not is_age:
                 continue
-            # Distingue officine vs référence dans le label
-            if any(ref in label for ref in ["ref", "ville", "national", "france", "moyen"]):
-                ref_vals[label] = float(valeur)
+            is_ref = any(r in label for r in ["ref", "ville", "national", "france", "national", "moyen", "bm", "benchmark"])
+            if is_ref:
+                ref[label] = float(val)
             else:
-                officine_vals[label] = float(valeur)
+                officine[label] = float(val)
 
-    if len(officine_vals) < 3:
+    if len(officine) < 3:
         return None
 
-    categories = sorted(officine_vals.keys())
-    ofi_series  = [officine_vals.get(c, 0) for c in categories]
-    ref_series  = [ref_vals.get(c, 0) for c in categories] if ref_vals else None
-
-    series = [{"name": "Votre officine", "values": ofi_series, "color": VU_BLUE}]
-    if ref_series and any(v > 0 for v in ref_series):
-        series.append({"name": "Référence locale", "values": ref_series, "color": VU_GREY})
+    cats   = sorted(officine.keys())
+    o_vals = [officine[c] for c in cats]
+    series = [{"name": "Votre officine (%)", "values": o_vals, "color": VU_BLUE}]
+    if len(ref) >= 3:
+        r_vals = [ref.get(c, 0) for c in cats]
+        series.append({"name": "Référence locale (%)", "values": r_vals, "color": VU_GREY})
 
     return {
         "type":         "bar",
         "title":        "Profil patients — Répartition par tranche d'âge (%)",
-        "categories":   categories,
+        "categories":   cats,
         "series":       series,
         "value_format": "%",
-        "show_benchmark_line": None,
     }
 
 
-def _chart_univers_repartition(kpi_dict: dict) -> Optional[dict]:
-    """
-    Horizontal bar : CA% et Marge% par univers hors ordonnances.
-    Cherche des KPIs dont la clé contient un nom d'univers connu.
-    """
-    univers_keywords = [
-        "senior", "sénior", "jambes", "nature", "bébé", "bebe",
-        "beauté", "beaute", "hygiene", "hygiène", "libre_acces",
-        "libre accès", "veto", "véto",
-    ]
+# ── PG_04_FINANCIERS — column CA/Marge N-1 vs N ──────────────────────────────
 
-    ca_by_univers    = {}
-    marge_by_univers = {}
+def _chart_financiers(kpi_dict: dict, **_) -> Optional[dict]:
+    """Column : CA HT et Marge Brute en k€ — N-1 reconstitué depuis évolution."""
+    ca_n    = _v(kpi_dict, "ca_total", "ca_ht")
+    marge_n = _v(kpi_dict, "marge_brute", "marge_globale")
+    evo_ca  = _v(kpi_dict, "evolution_ca_pct", "evo_ca")
+    evo_mg  = _v(kpi_dict, "evolution_marge_pct", "evo_marge")
 
-    for kpi_id, kpi in kpi_dict.items():
-        kpi_id_low = kpi_id.lower()
-        val = kpi.get("valeur")
-        if val is None:
-            continue
-        for uname in univers_keywords:
-            if uname in kpi_id_low:
-                canon = uname.capitalize()
-                if "ca" in kpi_id_low or "chiffre" in kpi_id_low:
-                    ca_by_univers[canon] = val
-                elif "marge" in kpi_id_low:
-                    marge_by_univers[canon] = val
-
-    if not ca_by_univers and not marge_by_univers:
+    if ca_n is None and marge_n is None:
         return None
 
-    all_univers = sorted(set(list(ca_by_univers.keys()) + list(marge_by_univers.keys())))
+    def to_k(v): return round(v / 1000, 1) if v and v > 1000 else v
+
+    if evo_ca is not None and ca_n is not None:
+        ca_n1 = round(ca_n / (1 + evo_ca / 100) / 1000, 1)
+        ca_n_k = round(ca_n / 1000, 1)
+        ca_series = [ca_n1, ca_n_k]
+        cats = ["N-1", "N"]
+    elif ca_n is not None:
+        ca_series = [round(ca_n / 1000, 1)]
+        cats = ["N"]
+    else:
+        ca_series = None
+        cats = ["N"]
+
+    if evo_mg is not None and marge_n is not None:
+        mg_n1 = round(marge_n / (1 + evo_mg / 100) / 1000, 1)
+        mg_n_k = round(marge_n / 1000, 1)
+        mg_series = [mg_n1, mg_n_k] if len(cats) == 2 else [mg_n_k]
+    elif marge_n is not None:
+        mg_series = [round(marge_n / 1000, 1)] * len(cats)
+    else:
+        mg_series = None
+
     series = []
-    if ca_by_univers:
-        series.append({
-            "name": "CA Hors ordos (%)",
-            "values": [ca_by_univers.get(u, 0) for u in all_univers],
-            "color": VU_BLUE,
-        })
-    if marge_by_univers:
-        series.append({
-            "name": "Marge Hors ordos (%)",
-            "values": [marge_by_univers.get(u, 0) for u in all_univers],
-            "color": VU_NAVY,
-        })
+    if ca_series:
+        series.append({"name": "CA HT (k€)",       "values": ca_series, "color": VU_NAVY})
+    if mg_series:
+        series.append({"name": "Marge Brute (k€)", "values": mg_series, "color": VU_BLUE})
+
+    if not series:
+        return None
+
+    return {
+        "type":         "column",
+        "title":        "CA et Marge Brute HT (k€)",
+        "categories":   cats,
+        "series":       series,
+        "value_format": "k€",
+    }
+
+
+# ── PG_05_COMMERCIAUX — grouped bar indicateurs vs benchmarks ────────────────
+
+def _chart_commerciaux(kpi_dict: dict, **_) -> Optional[dict]:
+    """Grouped bar : indicateurs commerciaux officine vs benchmark marché."""
+    freq    = _v(kpi_dict, "frequentation_j", "clients_j", "nb_clients_jour")
+    panier  = _v(kpi_dict, "panier_moyen", "panier_total")
+    conseil = _v(kpi_dict, "panier_conseil")
+
+    cats, off_vals, bm_vals = [], [], []
+
+    if freq is not None:
+        cats.append("Fréquentation\n(clients/j)")
+        off_vals.append(round(freq, 0))
+        bm_vals.append(BM["frequentation_j"])
+
+    if panier is not None:
+        cats.append("Panier moyen\ntotal (€)")
+        off_vals.append(round(panier, 2))
+        bm_vals.append(BM["panier_total"])
+
+    if conseil is not None:
+        cats.append("Panier\nconseil (€)")
+        off_vals.append(round(conseil, 2))
+        bm_vals.append(BM["panier_conseil"])
+
+    if not cats:
+        return None
+
+    return {
+        "type":         "bar",
+        "title":        "Indicateurs commerciaux vs Benchmark marché 2025",
+        "categories":   cats,
+        "series": [
+            {"name": "Votre officine",        "values": off_vals, "color": VU_BLUE},
+            {"name": "Benchmark marché 2025", "values": bm_vals,  "color": VU_GREY},
+        ],
+        "value_format": None,
+    }
+
+
+# ── PG_06_UNIVERS_CA — horizontal bar répartition univers ────────────────────
+
+def _chart_univers_ca(kpi_dict: dict, **_) -> Optional[dict]:
+    """Horizontal bar : CA% et Marge% par univers hors ordonnances."""
+    UNIVERS = ["senior", "sénior", "jambes", "nature", "libre", "hygiene",
+               "hygiène", "bébé", "bebe", "beauté", "beaute", "veto", "véto", "ortho"]
+
+    ca_u, mg_u = {}, {}
+    for kid, kpi in kpi_dict.items():
+        if not isinstance(kpi, dict):
+            continue
+        kid_l = kid.lower()
+        val   = kpi.get("valeur")
+        if val is None:
+            continue
+        for u in UNIVERS:
+            if u in kid_l:
+                canon = u.replace("é", "e").capitalize()
+                if any(x in kid_l for x in ["ca", "chiffre", "vente"]):
+                    ca_u[canon] = val
+                elif "marge" in kid_l:
+                    mg_u[canon] = val
+
+    all_u = sorted(set(list(ca_u) + list(mg_u)))
+    if not all_u:
+        return None
+
+    series = []
+    if ca_u:
+        series.append({"name": "CA hors ordos (%)",    "values": [ca_u.get(u, 0) for u in all_u], "color": VU_BLUE})
+    if mg_u:
+        series.append({"name": "Marge hors ordos (%)", "values": [mg_u.get(u, 0) for u in all_u], "color": VU_NAVY})
+
+    if not series:
+        return None
 
     return {
         "type":         "bar",
         "title":        "Répartition CA et Marge — Univers hors ordonnances",
-        "categories":   all_univers,
+        "categories":   all_u,
         "series":       series,
         "value_format": "%",
-        "show_benchmark_line": None,
     }
 
 
-def _chart_stocks(kpi_dict: dict) -> Optional[dict]:
-    """
-    Horizontal bar : Rotation stocks (jours) par univers vs benchmark.
-    """
-    rotation_keys = {k: v for k, v in kpi_dict.items() if "rotation" in k.lower() or "stock" in k.lower()}
-    if not rotation_keys:
+# ── PG_07_UNIVERS_EVO — column chart évolution % par univers ─────────────────
+
+def _chart_univers_evo(kpi_dict: dict, **_) -> Optional[dict]:
+    """Column : évolution CA% par univers N vs N-1."""
+    UNIVERS = ["senior", "sénior", "jambes", "nature", "libre", "hygiene",
+               "hygiène", "bébé", "bebe", "beauté", "beaute", "veto", "véto"]
+
+    evo_u = {}
+    for kid, kpi in kpi_dict.items():
+        if not isinstance(kpi, dict):
+            continue
+        kid_l = kid.lower()
+        val   = kpi.get("valeur")
+        if val is None:
+            continue
+        if not any(x in kid_l for x in ["evo", "evolution", "croissance", "variation"]):
+            continue
+        for u in UNIVERS:
+            if u in kid_l:
+                canon = u.replace("é", "e").capitalize()
+                evo_u[canon] = val
+
+    if len(evo_u) < 2:
         return None
 
-    categories, vals = [], []
-    for kpi_id, kpi in rotation_keys.items():
-        val = kpi.get("valeur")
-        if val is not None:
-            label = kpi.get("label_fr", kpi_id)
-            categories.append(label)
-            vals.append(round(val, 0))
+    cats = sorted(evo_u.keys(), key=lambda x: evo_u[x], reverse=True)
+    vals = [evo_u[c] for c in cats]
+    colors = [VU_GREEN if v >= 0 else VU_RED for v in vals]
 
-    if not categories:
+    # python-pptx ne supporte pas les couleurs par barre nativement →
+    # on sépare en 2 séries positives/négatives
+    pos_vals = [v if v >= 0 else 0 for v in vals]
+    neg_vals = [v if v <  0 else 0 for v in vals]
+
+    series = [{"name": "Croissance (%)",  "values": pos_vals, "color": VU_GREEN}]
+    if any(v < 0 for v in neg_vals):
+        series.append({"name": "Recul (%)", "values": neg_vals, "color": VU_RED})
+
+    return {
+        "type":         "column",
+        "title":        "Évolution CA par univers (N vs N-1, %)",
+        "categories":   cats,
+        "series":       series,
+        "value_format": "%",
+    }
+
+
+# ── PG_08_TOP_MARQUES — horizontal bar top marques ───────────────────────────
+
+def _chart_top_marques(kpi_dict: dict, **_) -> Optional[dict]:
+    """Horizontal bar : top marques par marge (si données disponibles)."""
+    MARQUE_KEYS = ["marque", "brand", "top_", "top10", "top 10"]
+    marques = {}
+    for kid, kpi in kpi_dict.items():
+        if not isinstance(kpi, dict):
+            continue
+        kid_l = kid.lower()
+        val   = kpi.get("valeur")
+        label = kpi.get("label_fr", kid)
+        if val is None:
+            continue
+        if any(m in kid_l for m in MARQUE_KEYS) and "marge" in kid_l:
+            marques[label] = val
+
+    if len(marques) < 3:
+        return None
+
+    sorted_m = sorted(marques.items(), key=lambda x: x[1], reverse=True)[:10]
+    cats, vals = zip(*sorted_m)
+
+    return {
+        "type":         "bar",
+        "title":        "Top marques — Marge HT hors ordonnances",
+        "categories":   list(cats),
+        "series": [{"name": "Marge HT", "values": list(vals), "color": VU_BLUE}],
+        "value_format": "€",
+    }
+
+
+# ── PG_09_MERCH_EXPO — grouped bar exposition% vs marge% ─────────────────────
+
+def _chart_merch_expo(kpi_dict: dict, **_) -> Optional[dict]:
+    """Grouped bar : exposition linéaire% vs marge% par univers."""
+    UNIVERS = ["senior", "sénior", "jambes", "nature", "libre", "hygiene",
+               "hygiène", "bébé", "bebe", "beauté", "beaute", "veto", "véto"]
+
+    expo_u, marge_u = {}, {}
+    for kid, kpi in kpi_dict.items():
+        if not isinstance(kpi, dict):
+            continue
+        kid_l = kid.lower()
+        val   = kpi.get("valeur")
+        if val is None:
+            continue
+        for u in UNIVERS:
+            if u not in kid_l:
+                continue
+            canon = u.replace("é", "e").capitalize()
+            if any(x in kid_l for x in ["expo", "lineaire", "linéaire", "rayon"]):
+                expo_u[canon] = val
+            elif "marge" in kid_l:
+                marge_u[canon] = val
+
+    all_u = sorted(set(list(expo_u) + list(marge_u)))
+    if len(all_u) < 2:
+        return None
+
+    series = []
+    if expo_u:
+        series.append({"name": "Exposition linéaire (%)", "values": [expo_u.get(u, 0) for u in all_u], "color": VU_ORANGE})
+    if marge_u:
+        series.append({"name": "Marge (%)",               "values": [marge_u.get(u, 0) for u in all_u], "color": VU_NAVY})
+
+    if len(series) < 1:
         return None
 
     return {
-        "type":       "bar",
-        "title":      "Rotation des stocks (jours)",
-        "categories": categories,
-        "series": [
-            {"name": "Votre officine",              "values": vals,
-             "color": VU_BLUE},
-            {"name": "Benchmark optimal (hors ordos)",
-             "values": [BENCHMARK["rotation_hors_max"]] * len(categories),
-             "color": VU_GREY},
-        ],
-        "value_format": "j",
-        "show_benchmark_line": BENCHMARK["rotation_hors_max"],
+        "type":         "bar",
+        "title":        "Exposition linéaire vs Marge — par univers (%)",
+        "categories":   all_u,
+        "series":       series,
+        "value_format": "%",
     }
 
 
-# ── Dispatch principal ────────────────────────────────────────────────────────
+# ── PG_10_MERCH_STOCKS — horizontal bar rotation stocks ──────────────────────
 
-# Mapping slide_id → builder
+def _chart_merch_stocks(kpi_dict: dict, **_) -> Optional[dict]:
+    """Horizontal bar : jours de stock par univers vs benchmark."""
+    STOCK_KW = ["rotation", "stock", "jours", "couverture"]
+    stocks = {}
+    for kid, kpi in kpi_dict.items():
+        if not isinstance(kpi, dict):
+            continue
+        kid_l = kid.lower()
+        val   = kpi.get("valeur")
+        label = kpi.get("label_fr", kid)
+        if val is None:
+            continue
+        if any(kw in kid_l for kw in STOCK_KW):
+            stocks[label] = round(float(val), 0)
+
+    if len(stocks) < 2:
+        return None
+
+    cats = sorted(stocks.keys(), key=lambda x: stocks[x], reverse=True)
+    vals = [stocks[c] for c in cats]
+    bm   = [BM["rotation_hors"]] * len(cats)
+
+    return {
+        "type":         "bar",
+        "title":        "Rotation des stocks (jours) vs Benchmark optimal",
+        "categories":   cats,
+        "series": [
+            {"name": "Votre officine (j)",           "values": vals, "color": VU_BLUE},
+            {"name": f"Benchmark hors ordos ({int(BM['rotation_hors'])}j)", "values": bm, "color": VU_GREY},
+        ],
+        "value_format": "j",
+    }
+
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+
 CHART_BUILDERS = {
-    "PG_01_INTRO":        _chart_financiers,
-    "PG_02_CA":           _chart_financiers,
-    "PG_03_CLIENTELE":    _chart_clientele,
-    "PG_04_PANIER":       _chart_commerciaux,
-    "PG_05_SAISONNALITE": _chart_commerciaux,
-    "PG_06_SYNTHESE":     None,   # SWOT — pas de graphique
+    "PG_00_CONTEXTE":      None,
+    "PG_01_SECTION":       None,
+    "PG_02_PROFIL_TYPE":   _chart_profil_type,
+    "PG_03_PROFIL_PATIENTS": _chart_profil_patients,
+    "PG_04_FINANCIERS":    _chart_financiers,
+    "PG_05_COMMERCIAUX":   _chart_commerciaux,
+    "PG_06_UNIVERS_CA":    _chart_univers_ca,
+    "PG_07_UNIVERS_EVO":   _chart_univers_evo,
+    "PG_08_TOP_MARQUES":   _chart_top_marques,
+    "PG_09_MERCH_EXPO":    _chart_merch_expo,
+    "PG_10_MERCH_STOCKS":  _chart_merch_stocks,
+    "PG_11_MERCH_SIGNA":   None,
+    "PG_12_SYNTHESE":      None,
 }
 
 
@@ -327,24 +458,12 @@ def build_chart_for_slide(
     image_results: list = None,
 ) -> Optional[dict]:
     """
-    Retourne la spec de graphique pour un slide donné, ou None si non applicable.
-
-    Args:
-        slide_id:      Identifiant du slide (ex: "PG_03_CLIENTELE")
-        kpi_dict:      Dict des KPIs calculés
-        image_results: Liste des résultats image (lot1 ou lot2) pour les données
-                       pyramide des âges
-
-    Returns:
-        Dict spec graphique ou None
+    Retourne la spec graphique pour un slide, ou None si non applicable / données insuffisantes.
     """
     builder = CHART_BUILDERS.get(slide_id)
     if builder is None:
         return None
-
     try:
-        if slide_id == "PG_03_CLIENTELE":
-            return builder(kpi_dict, image_results)
-        return builder(kpi_dict)
+        return builder(kpi_dict, image_results=image_results)
     except Exception:
         return None
