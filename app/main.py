@@ -71,6 +71,496 @@ def init_session_state():
 
 init_session_state()
 
+
+# ---------------------------------------------------------------------------
+# Professional CSS Theme — Agence VU Design System
+# ---------------------------------------------------------------------------
+def _inject_css():
+    st.markdown(
+        """
+<style>
+/* ── Fonts & Variables ─────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --vu-navy:       #1A2E4A;
+  --vu-navy-light: #243d62;
+  --vu-blue:       #008BD2;
+  --vu-blue-light: #e8f4fd;
+  --vu-green:      #27AE60;
+  --vu-orange:     #F39C12;
+  --vu-red:        #E74C3C;
+  --vu-grey:       #95A5A6;
+  --text-primary:  #1A2E4A;
+  --text-secondary:#5D6D7E;
+  --bg-main:       #F0F4F8;
+  --bg-card:       #FFFFFF;
+  --border:        #DDE3EA;
+  --shadow-sm:     0 1px 3px rgba(26,46,74,0.08);
+  --shadow-md:     0 4px 12px rgba(26,46,74,0.10);
+  --radius:        10px;
+  --radius-sm:     6px;
+}
+
+/* ── Base ──────────────────────────────────────────────────────────────── */
+html, body, [class*="css"] {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
+.stApp {
+  background: var(--bg-main) !important;
+}
+
+.main .block-container {
+  padding: 2rem 2.5rem 3rem !important;
+  max-width: 1280px;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+  background: var(--vu-navy) !important;
+  border-right: none !important;
+}
+[data-testid="stSidebar"] > div {
+  background: var(--vu-navy) !important;
+}
+/* Tous les textes sidebar en blanc */
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] div {
+  color: rgba(255,255,255,0.90) !important;
+}
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 {
+  color: #FFFFFF !important;
+}
+/* Section labels in sidebar */
+[data-testid="stSidebar"] .stMarkdown h3 {
+  color: var(--vu-blue) !important;
+  font-size: 0.65rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.12em !important;
+  margin: 1.25rem 0 0.4rem 0 !important;
+}
+/* Sidebar buttons */
+[data-testid="stSidebar"] .stButton > button {
+  background: rgba(255,255,255,0.08) !important;
+  border: 1px solid rgba(255,255,255,0.18) !important;
+  color: rgba(255,255,255,0.9) !important;
+  border-radius: var(--radius-sm) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  transition: all 0.15s ease !important;
+}
+[data-testid="stSidebar"] .stButton > button:hover {
+  background: rgba(0,139,210,0.25) !important;
+  border-color: var(--vu-blue) !important;
+  color: #FFFFFF !important;
+}
+/* Sidebar selectbox */
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div,
+[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] > div:hover {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.25) !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stSidebar"] .stSelectbox svg {
+  fill: rgba(255,255,255,0.6) !important;
+}
+/* Sidebar text input */
+[data-testid="stSidebar"] .stTextInput input {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.25) !important;
+  color: white !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stSidebar"] .stTextInput input::placeholder {
+  color: rgba(255,255,255,0.4) !important;
+}
+/* Sidebar expander */
+[data-testid="stSidebar"] [data-testid="stExpander"] {
+  background: rgba(255,255,255,0.06) !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+  color: rgba(255,255,255,0.9) !important;
+  font-weight: 500 !important;
+  font-size: 0.85rem !important;
+}
+/* Sidebar hr */
+[data-testid="stSidebar"] hr {
+  border-color: rgba(255,255,255,0.12) !important;
+  margin: 0.75rem 0 !important;
+}
+/* Sidebar alerts */
+[data-testid="stSidebar"] [data-testid="stAlert"] {
+  background: rgba(255,255,255,0.08) !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+}
+[data-testid="stSidebar"] [data-testid="stAlert"] p {
+  font-size: 0.8rem !important;
+}
+/* Sidebar radio */
+[data-testid="stSidebar"] .stRadio > div {
+  gap: 0.1rem !important;
+}
+[data-testid="stSidebar"] .stRadio label {
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  padding: 0.5rem 0.6rem !important;
+  border-radius: var(--radius-sm) !important;
+  transition: background 0.15s !important;
+}
+[data-testid="stSidebar"] .stRadio label:hover {
+  background: rgba(255,255,255,0.08) !important;
+}
+/* Active radio option */
+[data-testid="stSidebar"] .stRadio [aria-checked="true"] + label,
+[data-testid="stSidebar"] .stRadio input:checked + label {
+  background: rgba(0,139,210,0.3) !important;
+  color: white !important;
+}
+/* Caption in sidebar */
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] small {
+  color: rgba(255,255,255,0.5) !important;
+  font-size: 0.7rem !important;
+}
+
+/* ── Main headings ─────────────────────────────────────────────────────── */
+.main h1 {
+  color: var(--vu-navy) !important;
+  font-weight: 700 !important;
+  font-size: 1.6rem !important;
+  letter-spacing: -0.02em !important;
+  padding-bottom: 0.6rem !important;
+  border-bottom: 3px solid var(--vu-blue) !important;
+  margin-bottom: 1.5rem !important;
+}
+.main h2 {
+  color: var(--vu-navy) !important;
+  font-weight: 600 !important;
+  font-size: 1.2rem !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.75rem !important;
+}
+.main h3 {
+  color: var(--vu-navy) !important;
+  font-weight: 600 !important;
+  font-size: 1rem !important;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.stButton > button {
+  font-family: 'Inter', sans-serif !important;
+  font-weight: 500 !important;
+  font-size: 0.875rem !important;
+  border-radius: var(--radius-sm) !important;
+  transition: all 0.15s ease !important;
+  letter-spacing: 0.01em !important;
+}
+.stButton > button[kind="primary"],
+.stButton > button[data-testid*="primary"] {
+  background: var(--vu-navy) !important;
+  color: white !important;
+  border: none !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.stButton > button[kind="primary"]:hover {
+  background: var(--vu-blue) !important;
+  box-shadow: 0 4px 14px rgba(0,139,210,0.35) !important;
+  transform: translateY(-1px) !important;
+}
+.stButton > button[kind="secondary"] {
+  background: white !important;
+  color: var(--vu-navy) !important;
+  border: 1px solid var(--border) !important;
+}
+.stButton > button[kind="secondary"]:hover {
+  border-color: var(--vu-blue) !important;
+  color: var(--vu-blue) !important;
+}
+
+/* ── Metrics ───────────────────────────────────────────────────────────── */
+[data-testid="stMetric"] {
+  background: var(--bg-card) !important;
+  border-radius: var(--radius) !important;
+  padding: 1rem 1.25rem !important;
+  box-shadow: var(--shadow-sm) !important;
+  border: 1px solid var(--border) !important;
+  border-left: 4px solid var(--vu-blue) !important;
+}
+[data-testid="stMetric"] > label {
+  color: var(--text-secondary) !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+}
+[data-testid="stMetricValue"] {
+  color: var(--vu-navy) !important;
+  font-weight: 700 !important;
+  font-size: 1.5rem !important;
+}
+[data-testid="stMetricDelta"] {
+  font-size: 0.8rem !important;
+}
+
+/* ── Expanders / Cards ─────────────────────────────────────────────────── */
+[data-testid="stExpander"] {
+  background: var(--bg-card) !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+  margin-bottom: 0.75rem !important;
+  overflow: hidden !important;
+}
+[data-testid="stExpander"] summary {
+  font-weight: 600 !important;
+  color: var(--vu-navy) !important;
+  font-size: 0.9rem !important;
+  padding: 0.85rem 1rem !important;
+}
+[data-testid="stExpander"] summary:hover {
+  background: var(--vu-blue-light) !important;
+}
+[data-testid="stExpander"] summary svg {
+  color: var(--vu-blue) !important;
+}
+
+/* ── Inputs ────────────────────────────────────────────────────────────── */
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input {
+  border-radius: var(--radius-sm) !important;
+  border-color: var(--border) !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 0.875rem !important;
+  color: var(--text-primary) !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
+}
+.stTextInput input:focus,
+.stTextArea textarea:focus {
+  border-color: var(--vu-blue) !important;
+  box-shadow: 0 0 0 3px rgba(0,139,210,0.12) !important;
+  outline: none !important;
+}
+.stTextInput label,
+.stTextArea label,
+.stSelectbox label,
+.stNumberInput label {
+  color: var(--vu-navy) !important;
+  font-weight: 600 !important;
+  font-size: 0.8rem !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  margin-bottom: 0.35rem !important;
+}
+
+/* ── Selectbox ─────────────────────────────────────────────────────────── */
+.stSelectbox [data-baseweb="select"] > div {
+  border-radius: var(--radius-sm) !important;
+  border-color: var(--border) !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 0.875rem !important;
+}
+.stSelectbox [data-baseweb="select"] > div:focus-within {
+  border-color: var(--vu-blue) !important;
+  box-shadow: 0 0 0 3px rgba(0,139,210,0.12) !important;
+}
+
+/* ── Alerts ────────────────────────────────────────────────────────────── */
+[data-testid="stAlert"] {
+  border-radius: var(--radius) !important;
+  border: none !important;
+  font-size: 0.875rem !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="positive"],
+.stSuccess {
+  background: #EAFAF1 !important;
+  border-left: 4px solid var(--vu-green) !important;
+  color: #1D6E3B !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="warning"],
+.stWarning {
+  background: #FEF9E7 !important;
+  border-left: 4px solid var(--vu-orange) !important;
+  color: #9A5C0A !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="negative"],
+.stError {
+  background: #FDEDEC !important;
+  border-left: 4px solid var(--vu-red) !important;
+  color: #922B21 !important;
+}
+[data-testid="stAlert"][data-baseweb="notification"][kind="info"],
+.stInfo {
+  background: var(--vu-blue-light) !important;
+  border-left: 4px solid var(--vu-blue) !important;
+  color: #1A5276 !important;
+}
+
+/* ── File uploader ─────────────────────────────────────────────────────── */
+[data-testid="stFileUploader"] {
+  background: var(--bg-card) !important;
+  border-radius: var(--radius) !important;
+  border: 2px dashed var(--border) !important;
+  transition: border-color 0.2s !important;
+}
+[data-testid="stFileUploader"]:hover {
+  border-color: var(--vu-blue) !important;
+  background: var(--vu-blue-light) !important;
+}
+[data-testid="stFileUploader"] label {
+  font-weight: 600 !important;
+  color: var(--vu-navy) !important;
+  text-transform: none !important;
+  font-size: 0.875rem !important;
+  letter-spacing: 0 !important;
+}
+[data-testid="stFileUploaderDropzone"] {
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span {
+  color: var(--text-secondary) !important;
+  font-size: 0.8rem !important;
+}
+/* Upload "Browse files" button */
+[data-testid="stFileUploaderDropzone"] button {
+  background: var(--vu-navy) !important;
+  color: white !important;
+  border: none !important;
+  border-radius: var(--radius-sm) !important;
+  font-size: 0.8rem !important;
+  font-weight: 600 !important;
+  padding: 0.4rem 1rem !important;
+  transition: background 0.15s !important;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+  background: var(--vu-blue) !important;
+}
+
+/* ── DataFrames ────────────────────────────────────────────────────────── */
+[data-testid="stDataFrame"],
+[data-testid="stDataFrameContainer"] {
+  border-radius: var(--radius) !important;
+  overflow: hidden !important;
+  box-shadow: var(--shadow-sm) !important;
+  border: 1px solid var(--border) !important;
+}
+.dvn-scroller {
+  background: var(--bg-card) !important;
+}
+
+/* ── Status boxes (st.status) ──────────────────────────────────────────── */
+[data-testid="stStatusWidget"] {
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: var(--shadow-sm) !important;
+  background: var(--bg-card) !important;
+}
+
+/* ── Progress bar ──────────────────────────────────────────────────────── */
+[data-testid="stProgressBar"] > div > div,
+.stProgress > div > div > div {
+  background: var(--vu-blue) !important;
+  border-radius: 999px !important;
+}
+[data-testid="stProgressBar"] > div {
+  border-radius: 999px !important;
+  background: var(--border) !important;
+}
+
+/* ── Spinner ───────────────────────────────────────────────────────────── */
+[data-testid="stSpinner"] > div {
+  border-top-color: var(--vu-blue) !important;
+}
+
+/* ── Divider ───────────────────────────────────────────────────────────── */
+.main hr {
+  border: none !important;
+  border-top: 1px solid var(--border) !important;
+  margin: 1.5rem 0 !important;
+}
+
+/* ── Caption ───────────────────────────────────────────────────────────── */
+.stCaption, [data-testid="stCaptionContainer"] p {
+  color: var(--text-secondary) !important;
+  font-size: 0.78rem !important;
+}
+
+/* ── Toast ─────────────────────────────────────────────────────────────── */
+[data-testid="stToast"] {
+  background: var(--vu-navy) !important;
+  color: white !important;
+  border-radius: var(--radius) !important;
+  box-shadow: var(--shadow-md) !important;
+}
+[data-testid="stToast"] p {
+  color: white !important;
+}
+
+/* ── Download button (keep primary style) ─────────────────────────────── */
+.stDownloadButton > button {
+  border-radius: var(--radius-sm) !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+  transition: all 0.15s ease !important;
+}
+.stDownloadButton > button[kind="primary"] {
+  background: var(--vu-navy) !important;
+  color: white !important;
+  border: none !important;
+}
+.stDownloadButton > button[kind="primary"]:hover {
+  background: var(--vu-blue) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 14px rgba(0,139,210,0.35) !important;
+}
+
+/* ── JSON viewer ───────────────────────────────────────────────────────── */
+[data-testid="stJson"] {
+  background: var(--bg-card) !important;
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--border) !important;
+}
+
+/* ── Subheader spacing ─────────────────────────────────────────────────── */
+.main .stMarkdown h3 {
+  margin-top: 1.75rem !important;
+  padding-top: 0.5rem !important;
+  border-top: 1px solid var(--border) !important;
+}
+.main .stMarkdown h3:first-child {
+  border-top: none !important;
+  margin-top: 0 !important;
+}
+
+/* ── Column gaps ───────────────────────────────────────────────────────── */
+[data-testid="column"] {
+  gap: 0.75rem !important;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--vu-grey); }
+</style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_inject_css()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -138,8 +628,36 @@ def safe_json_dumps(obj) -> str:
 # Sidebar — Projet + Navigation
 # ---------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("## 💊 Agence VU")
-    st.markdown("---")
+    # ── Logo / Branding ──────────────────────────────────────────────────────
+    st.markdown(
+        """
+<div style="
+  padding: 1.5rem 1rem 1.25rem;
+  margin: -1rem -1rem 0;
+  background: linear-gradient(135deg, #1A2E4A 0%, #243d62 100%);
+  border-bottom: 2px solid rgba(0,139,210,0.5);
+  text-align: center;
+">
+  <div style="
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #FFFFFF;
+    letter-spacing: 0.1em;
+    font-family: 'Inter', sans-serif;
+  ">AGENCE <span style="color: #008BD2;">VU</span></div>
+  <div style="
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 0.2rem;
+  ">Pipeline Pharmacie</div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div style='height:0.25rem'></div>", unsafe_allow_html=True)
 
     # ── Projet actif ────────────────────────────────────────────────────────
     st.markdown("### 📁 Projet")
@@ -238,29 +756,91 @@ with st.sidebar:
     )
     st.markdown("---")
 
+    # ── API status ───────────────────────────────────────────────────────────
     if api_key_is_set():
-        st.success("✅ Clé API configurée")
+        st.markdown(
+            f"""
+<div style="
+  margin: 0.25rem 0;
+  padding: 0.6rem 0.85rem;
+  background: rgba(39,174,96,0.15);
+  border: 1px solid rgba(39,174,96,0.35);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+">
+  <span style="color: #4CAF50; font-size: 0.7rem;">●</span>
+  <span style="color: rgba(255,255,255,0.85); font-size: 0.78rem; font-weight: 500;">
+    API connectée
+  </span>
+</div>
+<div style="
+  color: rgba(255,255,255,0.4);
+  font-size: 0.68rem;
+  padding: 0.2rem 0.1rem;
+">Modèle: {get_model()}</div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
-        st.warning("⚠️ Clé API manquante\n\nDéfinissez `ANTHROPIC_API_KEY` dans `.env`")
+        st.markdown(
+            """
+<div style="
+  margin: 0.25rem 0;
+  padding: 0.6rem 0.85rem;
+  background: rgba(231,76,60,0.15);
+  border: 1px solid rgba(231,76,60,0.35);
+  border-radius: 6px;
+">
+  <span style="color: #E74C3C; font-size: 0.7rem;">●</span>
+  <span style="color: rgba(255,255,255,0.85); font-size: 0.78rem; font-weight: 500;">
+    Clé API manquante
+  </span>
+  <div style="color: rgba(255,255,255,0.4); font-size: 0.68rem; margin-top: 0.2rem;">
+    Définissez ANTHROPIC_API_KEY dans .env
+  </div>
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-    st.markdown(f"**Modèle:** `{get_model()}`")
-    st.markdown("---")
-    st.caption("Agence VU © 2026 — Pipeline Pharmacie v1.0")
+    st.markdown("<div style='height: 1rem'></div>", unsafe_allow_html=True)
+    st.markdown(
+        "<div style='color: rgba(255,255,255,0.25); font-size: 0.65rem; "
+        "text-align: center; padding-bottom: 0.5rem;'>"
+        "Agence VU © 2026 · v1.0</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ===========================================================================
 # PAGE 1 — LOT 1: Analyse des exemples
 # ===========================================================================
 if page == "🔬 Lot 1 — Analyse des exemples":
-    st.title("🔬 Lot 1 — Analyse des exemples")
     st.markdown(
         """
-        Cette section permet d'analyser des exemples réels de présentations Agence VU
-        pour en extraire les règles métier et la méthodologie.
-
-        **Importez vos fichiers exemples** pour que le pipeline puisse apprendre
-        la structure attendue des présentations.
-        """
+<div style="
+  background: linear-gradient(135deg, #1A2E4A 0%, #243d62 100%);
+  border-radius: 12px;
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+">
+  <div style="font-size: 2rem;">🔬</div>
+  <div>
+    <div style="color: white; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em;">
+      Lot 1 — Analyse des exemples
+    </div>
+    <div style="color: rgba(255,255,255,0.6); font-size: 0.82rem; margin-top: 0.2rem;">
+      Importez vos fichiers exemples pour extraire la structure et la méthodologie des présentations Agence VU
+    </div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
     )
 
     # -----------------------------------------------------------------------
@@ -566,7 +1146,11 @@ if page == "🔬 Lot 1 — Analyse des exemples":
         or st.session_state["lot1_pptx_texts"]
         or st.session_state["lot1_image_results"]
     ):
-        st.subheader("💾 Export global")
+        st.markdown(
+            "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+            "letter-spacing:0.12em;margin:1.5rem 0 0.75rem;'>💾 &nbsp;Export global</div>",
+            unsafe_allow_html=True,
+        )
         all_lot1_data = {
             "excel": st.session_state["lot1_excel_results"],
             "pptx": st.session_state["lot1_pptx_texts"],
@@ -586,7 +1170,30 @@ if page == "🔬 Lot 1 — Analyse des exemples":
 # PAGE 2 — Méthodologie
 # ===========================================================================
 elif page == "📋 Méthodologie":
-    st.title("📋 Méthodologie Agence VU")
+    st.markdown(
+        """
+<div style="
+  background: linear-gradient(135deg, #1A2E4A 0%, #243d62 100%);
+  border-radius: 12px;
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+">
+  <div style="font-size: 2rem;">📋</div>
+  <div>
+    <div style="color: white; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em;">
+      Méthodologie Agence VU
+    </div>
+    <div style="color: rgba(255,255,255,0.6); font-size: 0.82rem; margin-top: 0.2rem;">
+      Gérez, générez et appliquez les méthodologies de génération de rapports
+    </div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Clés session pour la page
     if "methodo_active_id"   not in st.session_state: st.session_state["methodo_active_id"]   = None
@@ -877,18 +1484,39 @@ elif page == "📋 Méthodologie":
 # PAGE 3 — LOT 2: Générer un rapport
 # ===========================================================================
 elif page == "🚀 Lot 2 — Générer un rapport":
-    st.title("🚀 Lot 2 — Génération automatique de rapport")
     st.markdown(
         """
-        Importez les données d'une pharmacie et lancez le pipeline complet pour générer
-        automatiquement la section **Performance Globale** du rapport AUDIT 360°.
-        """
+<div style="
+  background: linear-gradient(135deg, #1A2E4A 0%, #243d62 100%);
+  border-radius: 12px;
+  padding: 1.5rem 2rem;
+  margin-bottom: 1.75rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+">
+  <div style="font-size: 2rem;">🚀</div>
+  <div>
+    <div style="color: white; font-size: 1.35rem; font-weight: 700; letter-spacing: -0.01em;">
+      Lot 2 — Génération automatique de rapport
+    </div>
+    <div style="color: rgba(255,255,255,0.6); font-size: 0.82rem; margin-top: 0.2rem;">
+      Pipeline complet · Section <strong style="color: #008BD2;">Performance Globale</strong> · AUDIT 360°
+    </div>
+  </div>
+</div>
+        """,
+        unsafe_allow_html=True,
     )
 
     # -----------------------------------------------------------------------
     # Configuration
     # -----------------------------------------------------------------------
-    st.subheader("⚙️ Configuration")
+    st.markdown(
+        "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+        "letter-spacing:0.12em;margin-bottom:0.75rem;'>⚙️ &nbsp;Configuration</div>",
+        unsafe_allow_html=True,
+    )
     col1, col2 = st.columns(2)
 
     with col1:
@@ -911,7 +1539,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
     # -----------------------------------------------------------------------
     # File uploads
     # -----------------------------------------------------------------------
-    st.subheader("📁 Fichiers d'entrée")
+    st.markdown(
+        "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+        "letter-spacing:0.12em;margin:1.5rem 0 0.75rem;'>📁 &nbsp;Fichiers d'entrée</div>",
+        unsafe_allow_html=True,
+    )
 
     upload_col1, upload_col2, upload_col3, upload_col4 = st.columns(4)
 
@@ -979,7 +1611,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
     # ── Estimation des coûts Lot 2 ──────────────────────────────────────────
     if lot2_excel_files or lot2_image_files:
-        st.subheader("💰 Estimation des coûts API")
+        st.markdown(
+        "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+        "letter-spacing:0.12em;margin:1.5rem 0 0.75rem;'>💰 &nbsp;Estimation des coûts API</div>",
+        unsafe_allow_html=True,
+    )
         preview_rows = []
 
         for uf in (lot2_excel_files or []):
@@ -1021,12 +1657,28 @@ elif page == "🚀 Lot 2 — Générer un rapport":
     # Launch pipeline
     # -----------------------------------------------------------------------
     if not pharmacy_name:
-        st.warning("⚠️ Veuillez saisir le nom de la pharmacie avant de lancer le pipeline.")
+        st.markdown(
+            """
+<div style="
+  background: #FEF9E7;
+  border-left: 4px solid #F39C12;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: #9A5C0A;
+">
+  ⚠️ &nbsp;Veuillez saisir le nom de la pharmacie avant de lancer le pipeline.
+</div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     launch_disabled = not pharmacy_name
 
+    st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     if st.button(
-        "▶️ Lancer le pipeline",
+        "▶  Lancer le pipeline complet",
         type="primary",
         disabled=launch_disabled,
         use_container_width=True,
@@ -1460,7 +2112,11 @@ elif page == "🚀 Lot 2 — Générer un rapport":
     current_pharmacy = st.session_state.get("lot2_pharmacy_name", "pharmacie")
 
     if audit_report and slides:
-        st.subheader("📊 Résultats du pipeline")
+        st.markdown(
+            "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+            "letter-spacing:0.12em;margin:0.5rem 0 1rem;'>📊 &nbsp;Résultats du pipeline</div>",
+            unsafe_allow_html=True,
+        )
 
         # Audit summary
         if audit_report.get("passed", True):

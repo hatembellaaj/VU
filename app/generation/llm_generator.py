@@ -184,6 +184,33 @@ class LLMGenerator:
         self.model = model
         self.client = anthropic.Anthropic(api_key=api_key)
 
+    # Noms de pharmacies exemples connus dans les méthodologies types
+    _EXAMPLE_PHARMACY_NAMES = [
+        "Alésienne", "Alesienne", "alésienne", "alesienne",
+        "pharmacie exemple", "Pharmacie Exemple",
+        "pharmacie test", "Pharmacie Test",
+        "officine exemple", "Officine Exemple",
+    ]
+
+    def _sanitize_methodology(self, methodology: str, pharmacy_name: str) -> str:
+        """
+        Remplace les noms de pharmacies exemples dans la méthodologie
+        par '[PHARMACIE_EXEMPLE]' pour éviter que le LLM les réutilise.
+        """
+        if not methodology:
+            return methodology
+        import re
+        text = methodology
+        for name in self._EXAMPLE_PHARMACY_NAMES:
+            # Remplacement insensible à la casse, word-boundary
+            text = re.sub(
+                r'\b' + re.escape(name) + r'\b',
+                "[pharmacie_exemple]",
+                text,
+                flags=re.IGNORECASE,
+            )
+        return text
+
     def _format_kpi_block(self, kpi_dict: dict, required_kpi_ids: Optional[list] = None) -> str:
         """
         Format KPI values as a structured JSON block for injection into prompts.
@@ -223,31 +250,35 @@ class LLMGenerator:
         Basé uniquement sur le document de contexte — aucun KPI.
         """
         pharmacy_label = pharmacy_name or "la pharmacie"
+        methodology_clean = self._sanitize_methodology(methodology, pharmacy_label)
         return f"""Tu es un expert en marketing pharmaceutique travaillant pour l'Agence VU.
-Tu dois rédiger le contenu du **premier slide** de l'audit stratégique 360° de {pharmacy_label}.
-Ce slide de contexte présente la pharmacie avant toute analyse de performance.
+Tu dois rédiger le premier slide de l'audit 360° de **{pharmacy_label}**.
 
-## DOCUMENT DE CONTEXTE (source exclusive)
+## RÈGLE — NOM DE LA PHARMACIE
+Cette présentation est pour **{pharmacy_label}** UNIQUEMENT.
+N'utilise aucun autre nom de pharmacie, même s'il apparaît dans la méthodologie à titre d'exemple.
+
+## DOCUMENT DE CONTEXTE (source exclusive des faits)
 ```
 {context_text[:6000]}
 ```
 
-## MÉTHODOLOGIE AGENCE VU (ton et style)
-{methodology if methodology else "Adopter un ton professionnel, factuel et orienté action."}
+## MÉTHODOLOGIE AGENCE VU (ton et style uniquement)
+{methodology_clean if methodology_clean else "Adopter un ton professionnel, factuel et orienté action."}
 
 ## CONSIGNE
-Rédige un slide d'introduction qui synthétise :
-- La présentation de la pharmacie (localisation, type, historique si mentionné)
-- Le contexte stratégique (enjeux, projets en cours, points saillants)
-- Les 2-3 axes d'analyse qui vont suivre dans le rapport
+Rédige un slide d'introduction pour **{pharmacy_label}** qui synthétise :
+- Présentation de la pharmacie (localisation, type, historique si mentionné)
+- Contexte stratégique (enjeux, projets en cours, points saillants)
+- 2-3 axes d'analyse qui vont suivre dans le rapport
 
-Utilise UNIQUEMENT les informations présentes dans le document de contexte.
+Utilise UNIQUEMENT les informations du document de contexte ci-dessus.
 N'invente aucun chiffre ni fait non mentionné.
 
 ## FORMAT DE RÉPONSE (JSON strict, aucun texte avant ou après)
 {{
-  "titre": "Titre du slide (ex: Pharmacie du Marché — Contexte & Enjeux)",
-  "contenu": "Texte du slide en français (4-6 bullets maximum, style Agence VU)",
+  "titre": "Titre du slide — inclure le nom {pharmacy_label}",
+  "contenu": "Texte du slide en français (4-6 bullets, style Agence VU, pour {pharmacy_label})",
   "chiffres_cites": [],
   "sources": ["Document de contexte PDF"]
 }}"""
@@ -281,10 +312,20 @@ N'invente aucun chiffre ni fait non mentionné.
         kpi_block = self._format_kpi_block(kpi_dict, required_kpi_ids)
         pharmacy_label = pharmacy_name or "la pharmacie"
 
-        prompt = f"""Tu es un expert en marketing pharmaceutique travaillant pour l'Agence VU.
-Tu dois rédiger le contenu narratif d'une diapositive PowerPoint pour l'audit stratégique 360° de {pharmacy_label}.
+        # Nettoie la méthodologie : remplace tout nom de pharmacie exemple
+        # (Alésienne, pharmacie exemple, etc.) par le nom réel du client
+        methodology_clean = self._sanitize_methodology(methodology, pharmacy_label)
 
-## RÈGLE ABSOLUE — ANTI-HALLUCINATION
+        prompt = f"""Tu es un expert en marketing pharmaceutique travaillant pour l'Agence VU.
+Tu dois rédiger le contenu narratif d'une diapositive PowerPoint pour l'audit stratégique 360° de **{pharmacy_label}**.
+
+## RÈGLE ABSOLUE N°1 — NOM DE LA PHARMACIE
+Cette présentation est EXCLUSIVEMENT pour **{pharmacy_label}**.
+N'utilise PAS d'autre nom de pharmacie. Si la méthodologie cite des exemples avec d'autres noms
+(Alésienne, pharmacie exemple, etc.), ignore ces noms — ils sont des exemples de méthode uniquement.
+Chaque fois que tu voudrais écrire un nom de pharmacie, écris uniquement **{pharmacy_label}**.
+
+## RÈGLE ABSOLUE N°2 — ANTI-HALLUCINATION
 Tu ne peux utiliser QUE les valeurs numériques fournies dans le bloc KPI ci-dessous.
 N'invente AUCUN chiffre. N'arrondis PAS sans utiliser le chiffre exact fourni.
 Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
@@ -294,18 +335,19 @@ Si une valeur KPI est null, ne mentionne PAS de chiffre pour cet indicateur.
 {kpi_block}
 ```
 
-## MÉTHODOLOGIE AGENCE VU
-{methodology if methodology else "Adopter un ton professionnel, factuel et orienté action. Structurer en constats puis recommandations."}
+## MÉTHODOLOGIE AGENCE VU (règles de rédaction — les exemples sont illustratifs)
+{methodology_clean if methodology_clean else "Adopter un ton professionnel, factuel et orienté action. Structurer en constats puis recommandations."}
 
 ## DIAPOSITIVE À RÉDIGER
+- Client : **{pharmacy_label}**
 - Identifiant: {slide_id}
 - Titre suggéré: {slide_title}
 - Contenu attendu: {slide_description}
 
 ## FORMAT DE RÉPONSE (JSON strict, aucun texte avant ou après)
 {{
-  "titre": "Titre exact de la diapositive (court, impactant)",
-  "contenu": "Texte de la diapositive en français (3-5 phrases maximum). Utilise UNIQUEMENT les chiffres du bloc KPI.",
+  "titre": "Titre exact (court, impactant, sans nom de pharmacie exemple)",
+  "contenu": "Texte pour **{pharmacy_label}** (3-5 bullets). UNIQUEMENT les chiffres du bloc KPI. NOM : {pharmacy_label} uniquement.",
   "chiffres_cites": [liste des valeurs numériques exactes utilisées dans le contenu],
   "sources": [liste des labels KPI utilisés]
 }}"""
