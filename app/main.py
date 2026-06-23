@@ -329,7 +329,6 @@ html, body, [class*="css"] {
   border: 1px solid var(--border) !important;
   box-shadow: var(--shadow-sm) !important;
   margin-bottom: 0.75rem !important;
-  overflow: hidden !important;
 }
 [data-testid="stExpander"] summary {
   font-weight: 600 !important;
@@ -353,7 +352,13 @@ html, body, [class*="css"] {
   font-family: 'Inter', sans-serif !important;
   font-size: 0.875rem !important;
   color: var(--text-primary) !important;
+  background-color: #FFFFFF !important;
   transition: border-color 0.15s, box-shadow 0.15s !important;
+}
+/* Conteneur wrapper du textarea (Streamlit enveloppe dans un div avec classe css-*) */
+.stTextArea > div > div {
+  background-color: #FFFFFF !important;
+  border-radius: var(--radius-sm) !important;
 }
 .stTextInput input:focus,
 .stTextArea textarea:focus {
@@ -457,15 +462,12 @@ html, body, [class*="css"] {
 }
 
 /* ── DataFrames ────────────────────────────────────────────────────────── */
-[data-testid="stDataFrame"],
-[data-testid="stDataFrameContainer"] {
+/* NOTE: pas d'overflow:hidden ni de background sur le contenu interne —
+   cela casserait le rendu virtuel de la grille Streamlit */
+[data-testid="stDataFrame"] > div:first-child {
   border-radius: var(--radius) !important;
-  overflow: hidden !important;
   box-shadow: var(--shadow-sm) !important;
   border: 1px solid var(--border) !important;
-}
-.dvn-scroller {
-  background: var(--bg-card) !important;
 }
 
 /* ── Status boxes (st.status) ──────────────────────────────────────────── */
@@ -562,6 +564,28 @@ html, body, [class*="css"] {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--vu-grey); }
+
+/* ── Texte principal — éviter l'héritage de couleurs inattendues ────────── */
+.main .stMarkdown p,
+.main .stMarkdown li,
+.main .stMarkdown span,
+.main p {
+  color: var(--text-primary) !important;
+}
+/* Checklist HTML injectée via unsafe_allow_html */
+.main .stMarkdown div[style] {
+  color: inherit;
+}
+/* Force le texte à rester lisible dans les widgets standards */
+.stSelectbox [data-baseweb="select"] span,
+.stSelectbox [data-baseweb="select"] div[class] {
+  color: var(--text-primary) !important;
+}
+/* st.write / st.text dans les status boxes */
+[data-testid="stStatusWidget"] p,
+[data-testid="stStatusWidget"] span {
+  color: var(--text-primary) !important;
+}
 </style>
         """,
         unsafe_allow_html=True,
@@ -664,64 +688,66 @@ def _render_data_checklist(data_check: dict, expanded: bool = True):
             bg_color  = STATUS_COLORS.get(status, "#FFFFFF")
             label     = STATUS_LABELS.get(status, status)
 
-            # En-tête slide
-            st.markdown(
-                f"""
-<div style="
-  background:{bg_color};
-  border-radius:8px;
-  padding:0.65rem 1rem;
-  margin:0.4rem 0 0.15rem 0;
-  display:flex;
-  align-items:center;
-  gap:0.75rem;
-">
-  <span style="font-weight:700;color:#1A2E4A;font-size:0.82rem;">{slide['slide_id']}</span>
-  <span style="color:#5D6D7E;font-size:0.8rem;">—</span>
-  <span style="color:#1A2E4A;font-size:0.8rem;">{slide['titre']}</span>
-  <span style="margin-left:auto;font-size:0.78rem;font-weight:600;">{label}</span>
-</div>
-                """,
-                unsafe_allow_html=True,
-            )
+            # En-tête slide — tableau natif plus fiable que HTML injecté
+            col_id, col_title, col_status = st.columns([2, 5, 3])
+            with col_id:
+                st.markdown(
+                    f"<p style='margin:0;font-size:0.78rem;font-weight:700;"
+                    f"color:#1A2E4A;font-family:monospace;'>{slide['slide_id']}</p>",
+                    unsafe_allow_html=True,
+                )
+            with col_title:
+                st.markdown(
+                    f"<p style='margin:0;font-size:0.8rem;color:#2C3E50;'>{slide['titre']}</p>",
+                    unsafe_allow_html=True,
+                )
+            with col_status:
+                status_html = {
+                    STATUS_OK:      "<span style='color:#1D6E3B;font-weight:600;'>✅ Complet</span>",
+                    STATUS_PARTIAL: "<span style='color:#9A5C0A;font-weight:600;'>⚠️ Partiel</span>",
+                    STATUS_MISSING: "<span style='color:#922B21;font-weight:600;'>❌ Manquant</span>",
+                    STATUS_NO_DATA: "<span style='color:#1A5276;'>ℹ️ Sans données</span>",
+                    STATUS_SKIPPED: "<span style='color:#7F8C8D;'>⏭️ Non généré</span>",
+                }.get(status, label)
+                st.markdown(
+                    f"<p style='margin:0;font-size:0.8rem;text-align:right;'>{status_html}</p>",
+                    unsafe_allow_html=True,
+                )
 
             # Données trouvées
             if slide.get("found_details"):
-                found_str = " · ".join(
-                    f"**{d['label_fr']}** = {d['valeur']} {d['unite']} *(onglet: {d['onglet']})*"
-                    for d in slide["found_details"]
-                    if d.get("kpi_id") != "_context"
-                )
-                if found_str:
+                for d in slide["found_details"]:
+                    if d.get("kpi_id") == "_context":
+                        continue
                     st.markdown(
-                        f"<div style='padding:0 1rem 0.25rem 1.5rem;"
-                        f"font-size:0.75rem;color:#1D6E3B;'>✔ {found_str}</div>",
+                        f"<p style='margin:0.1rem 0 0 1.5rem;font-size:0.75rem;color:#1D6E3B;'>"
+                        f"✔ <strong>{d['label_fr']}</strong> = {d['valeur']} {d['unite']}"
+                        f" <em style='color:#7F8C8D;'>(onglet: {d['onglet']})</em></p>",
                         unsafe_allow_html=True,
                     )
 
             # Données manquantes
             if slide.get("missing_details"):
                 for m in slide["missing_details"]:
-                    cols_str   = ", ".join(f'"{c}"' for c in m["colonnes_attendues"][:4])
-                    sheets_str = ", ".join(f'"{s}"' for s in m["onglets_attendus"][:3])
+                    cols_str   = ", ".join(f'&quot;{c}&quot;' for c in m["colonnes_attendues"][:4])
+                    sheets_str = ", ".join(f'&quot;{s}&quot;' for s in m["onglets_attendus"][:3])
                     st.markdown(
-                        f"<div style='padding:0.1rem 1rem 0.1rem 1.5rem;"
-                        f"font-size:0.75rem;color:#922B21;'>"
-                        f"✘ <strong>{m['label_fr']}</strong> non trouvé"
-                        f"<br><span style='color:#7F8C8D;'>"
-                        f"Colonnes attendues : {cols_str or '(non défini)'}<br>"
-                        f"Onglets attendus : {sheets_str or '(non défini)'}"
-                        f"</span></div>",
+                        f"<p style='margin:0.1rem 0 0 1.5rem;font-size:0.75rem;color:#922B21;'>"
+                        f"✘ <strong>{m['label_fr']}</strong> — non trouvé</p>"
+                        f"<p style='margin:0 0 0 2.5rem;font-size:0.72rem;color:#7F8C8D;'>"
+                        f"Colonnes : {cols_str or '(non défini)'}  |  "
+                        f"Onglets : {sheets_str or '(non défini)'}</p>",
                         unsafe_allow_html=True,
                     )
 
             # Note spéciale (contexte, no_data, etc.)
             if slide.get("note") and status in (STATUS_NO_DATA, STATUS_SKIPPED):
-                st.markdown(
-                    f"<div style='padding:0 1rem 0.25rem 1.5rem;"
-                    f"font-size:0.72rem;color:#7F8C8D;font-style:italic;'>{slide['note']}</div>",
-                    unsafe_allow_html=True,
-                )
+                st.caption(slide["note"])
+
+            st.markdown(
+                "<hr style='margin:0.3rem 0;border:none;border-top:1px solid #EEE;'>",
+                unsafe_allow_html=True,
+            )
 
 
 def safe_json_dumps(obj) -> str:
