@@ -84,6 +84,74 @@ DEFAULT_RULES = {
         "sheet_hints": ["Saisonnalité", "Saisonnalite", "Mois"],
         "header_hints": ["saisonnalité", "saisonnalite", "indice saison", "seasonal"],
     },
+    # ── KPIs financiers supplémentaires ──────────────────────────────────────
+    "marge_brute": {
+        "label_fr": "Marge brute",
+        "unite": "€",
+        "seuil_bas": 200_000,
+        "seuil_haut": 600_000,
+        "sheet_hints": ["Marge", "CA", "Financier", "Résultats"],
+        "header_hints": ["marge brute", "marge ht", "mb", "marge totale"],
+    },
+    "evolution_marge_pct": {
+        "label_fr": "Évolution marge brute (%)",
+        "unite": "%",
+        "seuil_bas": -2.0,
+        "seuil_haut": 5.0,
+        "sheet_hints": ["Marge", "Evolution", "CA"],
+        "header_hints": ["evolution marge", "évolution marge", "variation marge", "var marge"],
+    },
+    "ca_par_etp": {
+        "label_fr": "CA par ETP",
+        "unite": "€",
+        "seuil_bas": 300_000,
+        "seuil_haut": 420_000,
+        "sheet_hints": ["ETP", "RH", "Financier", "CA"],
+        "header_hints": ["ca/etp", "ca par etp", "ca etp", "chiffre etp"],
+    },
+    "marge_par_etp": {
+        "label_fr": "Marge par ETP",
+        "unite": "€",
+        "seuil_bas": 80_000,
+        "seuil_haut": 130_000,
+        "sheet_hints": ["ETP", "RH", "Marge"],
+        "header_hints": ["marge/etp", "marge par etp", "marge etp"],
+    },
+    # ── KPIs commerciaux supplémentaires ─────────────────────────────────────
+    "frequentation_j": {
+        "label_fr": "Fréquentation journalière (clients/jour)",
+        "unite": "clients/j",
+        "seuil_bas": 100,
+        "seuil_haut": 250,
+        "sheet_hints": ["Fréquentation", "Frequentation", "Clients", "Activité"],
+        "header_hints": [
+            "frequentation/jour", "frequentation journaliere",
+            "clients/jour", "clients par jour", "passages/jour",
+            "fréquentation journalière", "nb visites/jour",
+        ],
+    },
+    "panier_ordonnances": {
+        "label_fr": "Panier moyen ordonnances",
+        "unite": "€",
+        "seuil_bas": 45.0,
+        "seuil_haut": 75.0,
+        "sheet_hints": ["Panier", "Ordonnances", "Commercial"],
+        "header_hints": [
+            "panier ordonnances", "panier ordo", "ticket ordo",
+            "panier rx", "panier moyen ordo",
+        ],
+    },
+    "panier_conseil": {
+        "label_fr": "Panier moyen conseil (hors ordos)",
+        "unite": "€",
+        "seuil_bas": 10.0,
+        "seuil_haut": 18.0,
+        "sheet_hints": ["Panier", "Conseil", "Commercial"],
+        "header_hints": [
+            "panier conseil", "panier hors ordo", "ticket conseil",
+            "panier otc", "panier hors ordonnances",
+        ],
+    },
 }
 
 

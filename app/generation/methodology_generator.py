@@ -58,6 +58,34 @@ Pour CHAQUE slide identifiée, décris précisément :
 ## 4. Données de référence marché
 Tableau récapitulatif de tous les benchmarks détectés (indicateur, valeur, source présumée).
 
+## 5. Mapping des données requises
+
+**SECTION CRITIQUE** — Cette section est parsée automatiquement par le pipeline.
+Génère un bloc JSON EXACTEMENT dans ce format (respecter la syntaxe strictement) :
+
+<!-- VU_MAPPING -->
+```json
+{{
+  "ca_total":           {{"colonnes": ["CA Total", "Chiffre d'affaires HT", "CA HT"], "onglets": ["CA", "Financier", "Synthèse"]}},
+  "evolution_ca_pct":   {{"colonnes": ["Évolution CA (%)", "Variation CA", "Croissance CA"], "onglets": ["CA", "Evolution"]}},
+  "marge_brute":        {{"colonnes": ["Marge brute", "Marge HT", "MB"], "onglets": ["Marge", "CA", "Financier"]}},
+  "evolution_marge_pct":{{"colonnes": ["Évolution marge (%)", "Variation marge"], "onglets": ["Marge", "Evolution"]}},
+  "ca_par_etp":         {{"colonnes": ["CA/ETP", "CA par ETP"], "onglets": ["ETP", "RH", "CA"]}},
+  "marge_par_etp":      {{"colonnes": ["Marge/ETP", "Marge par ETP"], "onglets": ["ETP", "RH", "Marge"]}},
+  "frequentation_j":    {{"colonnes": ["Fréquentation/jour", "Clients/jour", "Passages/jour"], "onglets": ["Fréquentation", "Clients"]}},
+  "panier_moyen":       {{"colonnes": ["Panier moyen", "Ticket moyen"], "onglets": ["Panier", "CA", "Commercial"]}},
+  "panier_ordonnances": {{"colonnes": ["Panier ordonnances", "Panier ordo", "Ticket ordo"], "onglets": ["Panier", "Ordonnances"]}},
+  "panier_conseil":     {{"colonnes": ["Panier conseil", "Panier hors ordo", "Ticket conseil"], "onglets": ["Panier", "Conseil"]}},
+  "part_ordonnances_pct":{{"colonnes": ["Part ordonnances (%)", "% ordonnances", "Taux ordo"], "onglets": ["Ordonnances", "CA"]}},
+  "nb_clients_actifs":  {{"colonnes": ["Clients actifs", "Nb clients", "Nombre clients"], "onglets": ["Clients", "Fidélisation"]}},
+  "taux_fidelisation":  {{"colonnes": ["Taux fidélisation (%)", "Fidélisation", "Rétention"], "onglets": ["Fidélisation", "Clients"]}}
+}}
+```
+<!-- /VU_MAPPING -->
+
+**Adapte les noms de colonnes** si tu as détecté dans le PPTX des références à des champs Excel spécifiques.
+Ajoute ou modifie les entrées selon ce que tu as observé dans les slides analysées.
+
 ---
 
 Sois le plus précis et opérationnel possible. Ce document sera utilisé comme instruction

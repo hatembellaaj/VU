@@ -21,6 +21,15 @@ from parsers.image_parser import ImageParser
 from parsers.questionnaire_parser import QuestionnaireParser
 from engine.kpi_engine import KPIEngine
 from engine.audit import AuditEngine
+from engine.data_checker import (
+    check_slides_data,
+    parse_mapping_from_methodology,
+    enrich_kpi_rules,
+    build_mapping_markdown,
+    DEFAULT_METHODOLOGY_MAPPING,
+    STATUS_OK, STATUS_PARTIAL, STATUS_MISSING, STATUS_NO_DATA, STATUS_SKIPPED,
+    STATUS_LABELS, STATUS_COLORS,
+)
 from generation.llm_generator import LLMGenerator
 from pptx_builder.assembler import PPTXAssembler
 from utils.cost_estimator import estimate_excel_info, estimate_image_cost, format_cost
@@ -57,6 +66,7 @@ def init_session_state():
         "lot2_pptx_bytes": None,
         "lot2_pharmacy_name": "",
         "lot2_context_text": "",
+        "lot2_data_check": None,
         "methodology_text": "",
         # Gestion de projet
         "current_project_id": None,
@@ -610,6 +620,108 @@ def format_kpi_statut(statut: str) -> str:
         "faible": "🔴 Faible",
         "inconnu": "⚪ Inconnu",
     }.get(statut, statut)
+
+
+def _render_data_checklist(data_check: dict, expanded: bool = True):
+    """
+    Affiche la checklist de disponibilité des données par slide.
+    data_check : résultat de check_slides_data()
+    """
+    if not data_check:
+        return
+
+    slides  = data_check.get("slides", [])
+    summary = data_check.get("summary", {})
+
+    # ── Résumé global ──────────────────────────────────────────────────────
+    n_ok      = summary.get(STATUS_OK, 0)
+    n_partial = summary.get(STATUS_PARTIAL, 0)
+    n_missing = summary.get(STATUS_MISSING, 0)
+    n_nodata  = summary.get(STATUS_NO_DATA, 0)
+    n_skipped = summary.get(STATUS_SKIPPED, 0)
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+    col_a.metric("✅ Complets",        n_ok)
+    col_b.metric("⚠️ Partiels",       n_partial)
+    col_c.metric("❌ Manquants",       n_missing)
+    col_d.metric("ℹ️ Sans données",   n_nodata + n_skipped)
+
+    if n_missing == 0 and n_partial == 0:
+        st.success("Toutes les données nécessaires ont été trouvées.")
+    elif n_missing > 0:
+        st.error(
+            f"{n_missing} slide(s) sans aucune donnée — les contenus générés seront très génériques."
+        )
+    else:
+        st.warning(
+            f"{n_partial} slide(s) avec données partielles — certains chiffres seront manquants."
+        )
+
+    # ── Tableau détaillé ───────────────────────────────────────────────────
+    with st.expander("📋 Détail par slide", expanded=expanded):
+        for slide in slides:
+            status    = slide["status"]
+            bg_color  = STATUS_COLORS.get(status, "#FFFFFF")
+            label     = STATUS_LABELS.get(status, status)
+
+            # En-tête slide
+            st.markdown(
+                f"""
+<div style="
+  background:{bg_color};
+  border-radius:8px;
+  padding:0.65rem 1rem;
+  margin:0.4rem 0 0.15rem 0;
+  display:flex;
+  align-items:center;
+  gap:0.75rem;
+">
+  <span style="font-weight:700;color:#1A2E4A;font-size:0.82rem;">{slide['slide_id']}</span>
+  <span style="color:#5D6D7E;font-size:0.8rem;">—</span>
+  <span style="color:#1A2E4A;font-size:0.8rem;">{slide['titre']}</span>
+  <span style="margin-left:auto;font-size:0.78rem;font-weight:600;">{label}</span>
+</div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Données trouvées
+            if slide.get("found_details"):
+                found_str = " · ".join(
+                    f"**{d['label_fr']}** = {d['valeur']} {d['unite']} *(onglet: {d['onglet']})*"
+                    for d in slide["found_details"]
+                    if d.get("kpi_id") != "_context"
+                )
+                if found_str:
+                    st.markdown(
+                        f"<div style='padding:0 1rem 0.25rem 1.5rem;"
+                        f"font-size:0.75rem;color:#1D6E3B;'>✔ {found_str}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            # Données manquantes
+            if slide.get("missing_details"):
+                for m in slide["missing_details"]:
+                    cols_str   = ", ".join(f'"{c}"' for c in m["colonnes_attendues"][:4])
+                    sheets_str = ", ".join(f'"{s}"' for s in m["onglets_attendus"][:3])
+                    st.markdown(
+                        f"<div style='padding:0.1rem 1rem 0.1rem 1.5rem;"
+                        f"font-size:0.75rem;color:#922B21;'>"
+                        f"✘ <strong>{m['label_fr']}</strong> non trouvé"
+                        f"<br><span style='color:#7F8C8D;'>"
+                        f"Colonnes attendues : {cols_str or '(non défini)'}<br>"
+                        f"Onglets attendus : {sheets_str or '(non défini)'}"
+                        f"</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+            # Note spéciale (contexte, no_data, etc.)
+            if slide.get("note") and status in (STATUS_NO_DATA, STATUS_SKIPPED):
+                st.markdown(
+                    f"<div style='padding:0 1rem 0.25rem 1.5rem;"
+                    f"font-size:0.72rem;color:#7F8C8D;font-style:italic;'>{slide['note']}</div>",
+                    unsafe_allow_html=True,
+                )
 
 
 def safe_json_dumps(obj) -> str:
@@ -1474,6 +1586,49 @@ elif page == "📋 Méthodologie":
                 use_container_width=True,
             )
 
+    # ── Section mapping données ───────────────────────────────────────────────
+    if methodology_content:
+        has_mapping = "<!-- VU_MAPPING -->" in methodology_content
+        with st.expander(
+            "📐 Mapping des données" + (" ✅ Présent" if has_mapping else " ⚠️ Absent"),
+            expanded=not has_mapping,
+        ):
+            if has_mapping:
+                parsed = parse_mapping_from_methodology(methodology_content)
+                st.success(
+                    f"Section de mapping présente — **{len(parsed)} KPI(s)** mappés. "
+                    "Le pipeline utilisera ces noms de colonnes en priorité."
+                )
+                st.json(parsed)
+            else:
+                st.warning(
+                    "Cette méthodologie ne contient pas de section de mapping des données. "
+                    "Sans elle, le pipeline utilise des noms de colonnes génériques et risque "
+                    "de ne pas retrouver vos données Excel."
+                )
+                if st.button(
+                    "➕ Insérer le mapping par défaut dans la méthodologie",
+                    type="primary",
+                ):
+                    mapping_block = build_mapping_markdown(DEFAULT_METHODOLOGY_MAPPING)
+                    new_content = methodology_content + mapping_block
+                    st.session_state["methodology_text"] = new_content
+                    # Sauvegarde automatique si méthodologie active
+                    if st.session_state.get("methodo_active_id"):
+                        active_meta = next(
+                            (m for m in ml.list_methodologies()
+                             if m["id"] == st.session_state["methodo_active_id"]),
+                            None,
+                        )
+                        if active_meta:
+                            ml.save_methodology(
+                                nom=active_meta["nom"],
+                                content=new_content,
+                                methodo_id=st.session_state["methodo_active_id"],
+                            )
+                    st.success("✅ Section mapping insérée et sauvegardée. Éditez les noms de colonnes selon vos fichiers Excel.")
+                    st.rerun()
+
     # Aperçu
     if methodology_content:
         with st.expander("👁️ Aperçu rendu"):
@@ -1689,6 +1844,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
         st.session_state["lot2_audit"]         = None
         st.session_state["lot2_pptx_bytes"]    = None
         st.session_state["lot2_context_text"]  = ""
+        st.session_state["lot2_data_check"]    = None
 
         # ===================================================================
         # STEP 1 — Parse all inputs
@@ -1870,7 +2026,21 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                             })
                     all_excel_data["sheets"]["Questionnaire"] = quant_sheet
 
-                kpi_engine = KPIEngine(raw_data=all_excel_data)
+                # Enrichir les règles KPI avec le mapping de la méthodologie
+                methodology_for_mapping = st.session_state.get("methodology_text", "")
+                methodo_mapping = parse_mapping_from_methodology(methodology_for_mapping)
+                if methodo_mapping:
+                    st.write(f"  📐 Mapping méthodologie détecté — {len(methodo_mapping)} KPI(s) enrichis")
+                    from engine.kpi_engine import DEFAULT_RULES
+                    enriched_rules = enrich_kpi_rules(DEFAULT_RULES, methodo_mapping)
+                else:
+                    enriched_rules = None
+                    st.write("  ℹ️ Pas de mapping méthodologie — utilisation des hints par défaut")
+
+                kpi_engine = KPIEngine(
+                    raw_data=all_excel_data,
+                    rules=enriched_rules,
+                )
                 kpis = kpi_engine.compute_all()
                 st.session_state["lot2_kpis"] = kpis
 
@@ -1878,9 +2048,9 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
                 # Count by status
                 statut_counts = df_kpis["statut"].value_counts()
-                n_bon = statut_counts.get("bon", 0)
-                n_moyen = statut_counts.get("moyen", 0)
-                n_faible = statut_counts.get("faible", 0)
+                n_bon     = statut_counts.get("bon", 0)
+                n_moyen   = statut_counts.get("moyen", 0)
+                n_faible  = statut_counts.get("faible", 0)
                 n_inconnu = statut_counts.get("inconnu", 0)
 
                 st.write(
@@ -1906,12 +2076,36 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     },
                 )
 
+                # ── Checklist de disponibilité des données ────────────────
+                st.write("  📋 Vérification de la couverture des données par slide...")
+                data_check = check_slides_data(
+                    kpi_dict=kpis,
+                    methodology_mapping=methodo_mapping,
+                    context_text=st.session_state.get("lot2_context_text", ""),
+                )
+                st.session_state["lot2_data_check"] = data_check
+
+                n_ok_check = data_check["summary"].get(STATUS_OK, 0)
+                n_ko_check = (
+                    data_check["summary"].get(STATUS_MISSING, 0)
+                    + data_check["summary"].get(STATUS_PARTIAL, 0)
+                )
+                if n_ko_check > 0:
+                    st.write(
+                        f"  ⚠️ {n_ko_check} slide(s) avec données insuffisantes — "
+                        f"voir la checklist dans les résultats"
+                    )
+                else:
+                    st.write(f"  ✅ Couverture données : {n_ok_check} slides complètes")
+
                 # Auto-save KPIs dans le projet actif
                 pid = st.session_state.get("current_project_id")
                 if pid:
                     pm.save_kpis(pid, kpis)
 
-                status.update(label="Étape 2 — KPIs calculés ✅", state="complete")
+                n_warn = data_check["summary"].get(STATUS_MISSING, 0) + data_check["summary"].get(STATUS_PARTIAL, 0)
+                label_suffix = f" — {n_warn} slide(s) avec données insuffisantes ⚠️" if n_warn else " ✅"
+                status.update(label=f"Étape 2 — KPIs calculés{label_suffix}", state="complete")
 
             except Exception as exc:
                 st.error(f"Erreur lors du calcul des KPIs: {exc}")
@@ -2106,15 +2300,25 @@ elif page == "🚀 Lot 2 — Générer un rapport":
     # -----------------------------------------------------------------------
     st.markdown("---")
 
-    audit_report = st.session_state.get("lot2_audit")
-    slides = st.session_state.get("lot2_slides")
-    pptx_bytes = st.session_state.get("lot2_pptx_bytes")
+    audit_report  = st.session_state.get("lot2_audit")
+    slides        = st.session_state.get("lot2_slides")
+    pptx_bytes    = st.session_state.get("lot2_pptx_bytes")
+    data_check    = st.session_state.get("lot2_data_check")
     current_pharmacy = st.session_state.get("lot2_pharmacy_name", "pharmacie")
+
+    # ── Checklist données (affiché dès que les KPIs sont calculés) ──────────
+    if data_check:
+        st.markdown(
+            "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+            "letter-spacing:0.12em;margin:0.5rem 0 0.75rem;'>📋 &nbsp;Checklist des données par slide</div>",
+            unsafe_allow_html=True,
+        )
+        _render_data_checklist(data_check, expanded=(not bool(slides)))
 
     if audit_report and slides:
         st.markdown(
             "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
-            "letter-spacing:0.12em;margin:0.5rem 0 1rem;'>📊 &nbsp;Résultats du pipeline</div>",
+            "letter-spacing:0.12em;margin:1.5rem 0 1rem;'>📊 &nbsp;Résultats du pipeline</div>",
             unsafe_allow_html=True,
         )
 
