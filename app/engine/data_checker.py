@@ -30,6 +30,11 @@ def _get_default_rules():
     return DEFAULT_RULES
 
 
+def _get_derived_rules():
+    from engine.kpi_engine import DERIVED_RULES
+    return DERIVED_RULES
+
+
 def _get_slides_def():
     from generation.llm_generator import PERFORMANCE_GLOBALE_SLIDES
     return PERFORMANCE_GLOBALE_SLIDES
@@ -215,6 +220,7 @@ def check_slides_data(
 
     mapping = methodology_mapping or {}
     default_rules = _get_default_rules()
+    derived_rules = _get_derived_rules()
 
     result_slides = []
     summary = {STATUS_OK: 0, STATUS_PARTIAL: 0, STATUS_MISSING: 0,
@@ -307,15 +313,27 @@ def check_slides_data(
                 if kpi_id in mapping:
                     colonnes_attendues = mapping[kpi_id].get("colonnes", [])
                     onglets_attendus   = mapping[kpi_id].get("onglets", [])
-                # Fallback : règles par défaut du KPIEngine
-                if not colonnes_attendues and kpi_id in default_rules:
-                    colonnes_attendues = default_rules[kpi_id].get("header_hints", [])
-                if not onglets_attendus and kpi_id in default_rules:
-                    onglets_attendus = default_rules[kpi_id].get("sheet_hints", [])
+                # Fallback : règles par défaut du KPIEngine (raw puis dérivé)
+                if not colonnes_attendues:
+                    if kpi_id in default_rules:
+                        colonnes_attendues = default_rules[kpi_id].get("header_hints", [])
+                    elif kpi_id in derived_rules:
+                        dh = derived_rules[kpi_id].get("direct_hints", {})
+                        colonnes_attendues = dh.get("header_hints", [])
+                        formula_src = derived_rules[kpi_id].get("formula_source", "")
+                        if formula_src:
+                            colonnes_attendues = [f"Calculé: {formula_src}"] + colonnes_attendues
+                if not onglets_attendus:
+                    if kpi_id in default_rules:
+                        onglets_attendus = default_rules[kpi_id].get("sheet_hints", [])
+                    elif kpi_id in derived_rules:
+                        dh = derived_rules[kpi_id].get("direct_hints", {})
+                        onglets_attendus = dh.get("sheet_hints", [])
 
                 label_fr = (
                     (kpi_entry or {}).get("label_fr")
-                    or default_rules.get(kpi_id, {}).get("label_fr", kpi_id)
+                    or default_rules.get(kpi_id, {}).get("label_fr")
+                    or derived_rules.get(kpi_id, {}).get("label_fr", kpi_id)
                 )
 
                 missing_details.append({
@@ -365,17 +383,35 @@ def check_slides_data(
 # ── Mapping par défaut (utile pour initialiser une méthodologie) ──────────────
 
 DEFAULT_METHODOLOGY_MAPPING = {
+    # ── KPIs bruts directs ────────────────────────────────────────────────────
     "ca_total": {
-        "colonnes": ["CA Total", "Chiffre d'affaires HT", "CA HT", "Ventes TTC"],
-        "onglets":  ["CA", "Financier", "Synthèse", "Résultats"]
+        "colonnes": ["CA Total", "CA HT Total", "Chiffre d'affaires HT", "CA HT", "Total CA"],
+        "onglets":  ["CA", "Financier", "Synthèse", "Résultats", "Ventes par TVA"]
     },
-    "evolution_ca_pct": {
-        "colonnes": ["Évolution CA", "Evolution CA (%)", "Var. CA", "Croissance CA"],
-        "onglets":  ["CA", "Evolution", "Financier"]
+    # KPIs intermédiaires nécessaires aux calculs dérivés
+    "ca_tva_21": {
+        "colonnes": ["TVA 2,1%", "2,1%", "CA TVA 2,1", "Remboursable", "CA ordonnances"],
+        "onglets":  ["TVA", "Ventes par TVA", "CA", "Remboursé"]
+    },
+    "ca_hors_ordos": {
+        "colonnes": ["CA hors ordo", "TVA 10%", "TVA 20%", "CA conseil", "Libre accès"],
+        "onglets":  ["TVA", "Ventes par TVA", "CA"]
+    },
+    "nb_transactions": {
+        "colonnes": ["Nb transactions", "Nb actes", "Nb tickets", "Nb ventes", "Passages"],
+        "onglets":  ["Ventes", "Commercial", "Activité", "Transactions"]
+    },
+    "nb_transactions_ordos": {
+        "colonnes": ["Nb actes ordo", "Nb ordonnances", "Actes ordonnances", "Tickets ordo"],
+        "onglets":  ["Ventes", "Commercial", "Ordonnances"]
     },
     "marge_brute": {
         "colonnes": ["Marge brute", "Marge HT", "MB", "Marge totale"],
         "onglets":  ["Marge", "CA", "Financier"]
+    },
+    "evolution_ca_pct": {
+        "colonnes": ["Évolution CA", "Evolution CA (%)", "Var. CA", "Croissance CA"],
+        "onglets":  ["CA", "Evolution", "Financier"]
     },
     "evolution_marge_pct": {
         "colonnes": ["Évolution marge", "Evolution marge (%)", "Var. marge"],
@@ -389,28 +425,29 @@ DEFAULT_METHODOLOGY_MAPPING = {
         "colonnes": ["Marge/ETP", "Marge par ETP"],
         "onglets":  ["ETP", "RH", "Marge"]
     },
+    # ── KPIs dérivés (calculés depuis les intermédiaires) ─────────────────────
     "frequentation_j": {
-        "colonnes": ["Fréquentation/jour", "Clients/jour", "Passages/jour", "Fréquentation journalière"],
+        "colonnes": ["Fréquentation/jour", "Clients/jour", "Passages/jour",
+                     "Calculé: nb_transactions / 300 jours ouvrés"],
         "onglets":  ["Fréquentation", "Clients", "Activité"]
     },
     "panier_moyen": {
-        "colonnes": ["Panier moyen", "Ticket moyen", "Panier total"],
+        "colonnes": ["Panier moyen", "Ticket moyen", "Calculé: ca_total / nb_transactions"],
         "onglets":  ["Panier", "CA", "Commercial"]
     },
     "panier_ordonnances": {
-        "colonnes": ["Panier ordonnances", "Panier ordo", "Ticket ordo", "Panier Rx"],
+        "colonnes": ["Panier ordonnances", "Panier ordo", "Ticket ordo", "Panier Rx",
+                     "Calculé: ca_tva_21 / nb_transactions_ordos"],
         "onglets":  ["Panier", "Ordonnances", "Commercial"]
     },
     "panier_conseil": {
-        "colonnes": ["Panier conseil", "Panier hors ordo", "Ticket conseil", "Panier OTC"],
+        "colonnes": ["Panier conseil", "Panier hors ordo", "Ticket conseil", "Panier OTC",
+                     "Calculé: ca_hors_ordos / nb_transactions_conseil"],
         "onglets":  ["Panier", "Conseil", "Commercial"]
     },
     "part_ordonnances_pct": {
-        "colonnes": ["Part ordonnances (%)", "% ordonnances", "Taux ordo", "Part Rx"],
-        "onglets":  ["Ordonnances", "CA", "Répartition"]
-    },
-    "panier_moyen": {
-        "colonnes": ["Panier moyen", "Ticket moyen"],
-        "onglets":  ["Panier", "CA"]
+        "colonnes": ["Part ordonnances (%)", "% ordonnances", "Taux ordo", "Part Rx",
+                     "Calculé: ca_tva_21 / ca_total × 100"],
+        "onglets":  ["Ordonnances", "CA", "Répartition", "TVA"]
     },
 }
