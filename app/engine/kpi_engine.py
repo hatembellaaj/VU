@@ -25,14 +25,33 @@ RAW_RULES: dict = {
         "unite": "€",
         "seuil_bas": 800_000,
         "seuil_haut": 2_000_000,
-        "sheet_hints": ["CA", "Chiffre", "Ventes", "Total", "Annuel", "Synthese", "Synthèse"],
+        # Cherche d'abord dans des feuilles "synthèse" avec une ligne total
+        "sheet_hints": ["Synthese", "Synthèse", "Annuel", "Total", "Bilan", "CA global", "CA total"],
         "header_hints": [
             "ca total", "ca ht total", "ca ht annuel", "chiffre d'affaires total",
             "total ca ht", "ca global", "ventes totales ht", "total ht",
-            "ca annuel", "total ventes",
+            "ca annuel", "total ventes", "ca net",
         ],
         "prefer_row": "max",
-        "min_value": 50_000,     # évite de prendre une valeur mensuelle ou unitaire
+        "min_value": 200_000,     # un CA total pharmacie est toujours > 200k€
+        "preferred_sheets_only": False,
+        # Stratégie alternative : sommer les colonnes mensuelles si feuille TVA
+        "_aggregate_fallback": True,
+    },
+    "ca_total_from_tva": {
+        "label_fr": "CA total (somme mensuelle TVA)",
+        "unite": "€",
+        "_raw_only": True,
+        "seuil_bas": 0,
+        "seuil_haut": 99_999_999,
+        "sheet_hints": ["TVA", "Ventes par TVA", "Ventes mois", "Mensuel"],
+        "header_hints": [
+            "total", "ca total", "total ca", "ca ht", "total ht",
+            "ca ttc", "total ttc", "montant total",
+        ],
+        "prefer_row": "sum",     # additionne toutes les lignes (12 mois → total annuel)
+        "min_value": 1_000,      # ignore les valeurs négligeables
+        "preferred_sheets_only": True,
     },
     "ca_tva_21": {
         "label_fr": "CA TVA 2,1% (ordonnances remboursables)",
@@ -40,15 +59,17 @@ RAW_RULES: dict = {
         "_raw_only": True,       # utilisé pour calculs dérivés, pas affiché seul
         "seuil_bas": 0,
         "seuil_haut": 99_999_999,
-        "sheet_hints": ["TVA", "Ventes", "Remboursé", "Remboursable", "CA"],
+        "sheet_hints": ["TVA", "Ventes par TVA", "Remboursé", "Remboursable"],
         "header_hints": [
-            "2,1%", "2.1%", "tva 2,1", "tva 2.1", "taux 2,1",
+            "tva 2,1", "tva 2.1", "2,1%", "2.1%",
             "remboursable", "remboursé", "rembourse",
             "ca ordo", "ca ordonnances", "ca remboursable",
-            "ventes 2,1", "ventes remboursables",
+            "ventes remboursables",
         ],
-        "prefer_row": "max",
-        "min_value": 10_000,
+        # Sommer les 12 mois pour obtenir le total annuel
+        "prefer_row": "sum",
+        "min_value": 1_000,
+        "preferred_sheets_only": True,   # ne PAS chercher dans les transactions brutes
     },
     "ca_hors_ordos": {
         "label_fr": "CA hors ordonnances (libre accès)",
@@ -72,15 +93,17 @@ RAW_RULES: dict = {
         "_raw_only": True,
         "seuil_bas": 0,
         "seuil_haut": 99_999_999,
-        "sheet_hints": ["Ventes", "Commercial", "Activité", "Transactions", "Actes"],
+        "sheet_hints": ["Ventes", "Commercial", "Activité", "Transactions", "Actes", "TVA"],
         "header_hints": [
             "nb transactions", "nb actes", "nb tickets", "nb ventes",
             "nombre transactions", "nombre actes", "nombre ventes",
             "transactions totales", "actes totaux", "total transactions",
             "passages", "nb passages",
         ],
-        "prefer_row": "max",
-        "min_value": 100,
+        # Sommer les lignes mensuelles
+        "prefer_row": "sum",
+        "min_value": 10,
+        "preferred_sheets_only": True,  # ne pas chercher dans les transactions brutes
     },
     "nb_transactions_ordos": {
         "label_fr": "Nombre de transactions ordonnances",
@@ -97,6 +120,38 @@ RAW_RULES: dict = {
         "prefer_row": "max",
         "min_value": 10,
     },
+    "evolution_ca_pct": {
+        "label_fr": "Évolution CA (%)",
+        "unite": "%",
+        "seuil_bas": -2.0,
+        "seuil_haut": 5.0,
+        "sheet_hints": ["Evolution", "Évolution", "Synthese", "Synthèse", "Bilan"],
+        "header_hints": [
+            "evolution ca", "évolution ca", "variation ca", "croissance ca",
+            "var ca", "delta ca", "evol ca", "% évolution ca",
+            "evol ca %", "ca evol",
+        ],
+        "prefer_row": "last",
+        "min_value": -100,
+        "max_value": 200,
+        # Ne cherche PAS dans les fichiers de transactions brutes
+        "preferred_sheets_only": True,
+    },
+    "evolution_marge_pct": {
+        "label_fr": "Évolution marge brute (%)",
+        "unite": "%",
+        "seuil_bas": -2.0,
+        "seuil_haut": 5.0,
+        "sheet_hints": ["Marge", "Evolution", "Évolution", "Synthese"],
+        "header_hints": [
+            "evolution marge", "évolution marge", "variation marge",
+            "var marge", "delta marge", "evol marge", "% évolution marge",
+        ],
+        "prefer_row": "last",
+        "min_value": -100,
+        "max_value": 200,
+        "preferred_sheets_only": True,
+    },
     "marge_brute": {
         "label_fr": "Marge brute",
         "unite": "€",
@@ -109,34 +164,7 @@ RAW_RULES: dict = {
         ],
         "prefer_row": "max",
         "min_value": 50_000,
-    },
-    "evolution_ca_pct": {
-        "label_fr": "Évolution CA (%)",
-        "unite": "%",
-        "seuil_bas": -2.0,
-        "seuil_haut": 5.0,
-        "sheet_hints": ["Evolution", "Évolution", "CA", "Synthese"],
-        "header_hints": [
-            "evolution ca", "évolution ca", "variation ca", "croissance ca",
-            "var ca", "delta ca", "evol ca", "% évolution ca",
-        ],
-        "prefer_row": "last",
-        "min_value": -100,
-        "max_value": 200,
-    },
-    "evolution_marge_pct": {
-        "label_fr": "Évolution marge brute (%)",
-        "unite": "%",
-        "seuil_bas": -2.0,
-        "seuil_haut": 5.0,
-        "sheet_hints": ["Marge", "Evolution", "CA"],
-        "header_hints": [
-            "evolution marge", "évolution marge", "variation marge",
-            "var marge", "delta marge", "evol marge", "% évolution marge",
-        ],
-        "prefer_row": "last",
-        "min_value": -100,
-        "max_value": 200,
+        "preferred_sheets_only": True,
     },
     "ca_par_etp": {
         "label_fr": "CA par ETP",
@@ -269,17 +297,19 @@ DERIVED_RULES: dict = {
         "unite": "%",
         "seuil_bas": 50.0,
         "seuil_haut": 80.0,
-        # Cherche d'abord une colonne directe
+        # Cherche d'abord une colonne directe (dans feuilles dédiées seulement)
         "direct_hints": {
-            "sheet_hints": ["TVA", "Ventes", "CA", "Répartition"],
+            "sheet_hints": ["Répartition", "Ordonnances", "Synthese", "Synthèse"],
             "header_hints": [
                 "part ordonnances", "% ordonnances", "taux ordo",
                 "part ordo", "% ordo", "part rx", "part remboursable",
-                "% remboursable", "% tva 2,1",
+                "% remboursable",
+                # NOTE: "% tva 2,1" retiré — correspond au taux TVA (2.1), pas à la part
             ],
             "prefer_row": "last",
-            "min_value": 0,
+            "min_value": 20,     # part ordo < 20% serait aberrant pour une pharmacie française
             "max_value": 100,
+            "preferred_sheets_only": True,
         },
         # Si colonne directe absente → calcul
         "formula": lambda kpis: (
@@ -430,6 +460,8 @@ class KPIEngine:
         prefer_row: str = "first",
         min_value: Optional[float] = None,
         max_value: Optional[float] = None,
+        preferred_sheets_only: bool = False,
+        aggregate: Optional[str] = None,
     ) -> tuple:
         """
         Search for a KPI value in parsed sheets.
@@ -438,6 +470,14 @@ class KPIEngine:
           "first" — première ligne numérique de la colonne
           "last"  — dernière ligne numérique (souvent le total)
           "max"   — valeur absolue maximum dans la colonne
+          "sum"   — somme de toutes les valeurs de la colonne (équivalent aggregate="sum")
+
+        preferred_sheets_only:
+          True  — ne cherche QUE dans les feuilles dont le nom matche sheet_hints
+          False — cherche d'abord dans les feuilles préférées, puis dans les autres (défaut)
+
+        aggregate:
+          "sum" — additionne toutes les valeurs de la colonne (pour CA mensuel → annuel)
 
         Returns (value, sheet_name, cell_ref) or (None, None, None).
         AUCUN fallback heuristique — retourne None si aucun header ne correspond.
@@ -453,7 +493,12 @@ class KPIEngine:
             else:
                 others.append(sname)
 
-        for sheet_name in preferred + others:
+        # Si preferred_sheets_only → on ignore les feuilles non préférées
+        search_order = preferred if preferred_sheets_only else preferred + others
+
+        do_sum = (aggregate == "sum" or prefer_row == "sum")
+
+        for sheet_name in search_order:
             sheet_data = sheets[sheet_name]
             headers = sheet_data.get("headers", [])
             rows    = sheet_data.get("rows", [])
@@ -480,26 +525,52 @@ class KPIEngine:
                         if not candidates:
                             continue
 
-                        # Sélection selon prefer_row
-                        if prefer_row == "last":
+                        # Agrégation ou sélection selon prefer_row
+                        if do_sum:
+                            chosen_val = round(sum(v for v, _ in candidates), 2)
+                            # cell_ref = plage approximative
+                            cell_ref = f"SUM({len(candidates)} lignes)"
+                        elif prefer_row == "last":
                             chosen_val, chosen_row = candidates[-1]
+                            cell_ref = None
+                            for nc in numeric_cells:
+                                if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                                    cell_ref = nc["ref"]
+                                    break
                         elif prefer_row == "max":
                             chosen_val, chosen_row = max(candidates, key=lambda x: abs(x[0]))
+                            cell_ref = None
+                            for nc in numeric_cells:
+                                if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                                    cell_ref = nc["ref"]
+                                    break
                         else:  # "first"
                             chosen_val, chosen_row = candidates[0]
-
-                        # Lookup cell_ref
-                        cell_ref = None
-                        for nc in numeric_cells:
-                            if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
-                                cell_ref = nc["ref"]
-                                break
+                            cell_ref = None
+                            for nc in numeric_cells:
+                                if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                                    cell_ref = nc["ref"]
+                                    break
 
                         return chosen_val, sheet_name, cell_ref
 
         # ── PAS DE FALLBACK HEURISTIQUE ─────────────────────────────────────
         # Retourner None proprement plutôt que de deviner une valeur incorrecte
         return None, None, None
+
+    def list_all_headers(self) -> dict:
+        """
+        Retourne tous les en-têtes de colonnes trouvés dans chaque feuille.
+        Utile pour le diagnostic : permet d'identifier les vrais noms de colonnes Excel.
+
+        Returns: {sheet_name: [header, ...]}
+        """
+        result = {}
+        for sname, sdata in self.raw_data.get("sheets", {}).items():
+            headers = [h for h in sdata.get("headers", []) if h and str(h).strip()]
+            if headers:
+                result[sname] = headers
+        return result
 
     # ── Status helper ────────────────────────────────────────────────────────
 
@@ -525,17 +596,21 @@ class KPIEngine:
 
         # ── PASS 1 : KPIs bruts (lookup direct) ─────────────────────────────
         for kpi_id, rule in self.rules.items():
-            header_hints = rule.get("header_hints", [])
-            sheet_hints  = rule.get("sheet_hints", [])
-            prefer_row   = rule.get("prefer_row", "first")
-            min_value    = rule.get("min_value")
-            max_value    = rule.get("max_value")
+            header_hints           = rule.get("header_hints", [])
+            sheet_hints            = rule.get("sheet_hints", [])
+            prefer_row             = rule.get("prefer_row", "first")
+            min_value              = rule.get("min_value")
+            max_value              = rule.get("max_value")
+            preferred_sheets_only  = rule.get("preferred_sheets_only", False)
+            aggregate              = rule.get("aggregate")
 
             valeur, onglet, cellule = self._find_value_in_sheets(
                 header_hints, sheet_hints,
                 prefer_row=prefer_row,
                 min_value=min_value,
                 max_value=max_value,
+                preferred_sheets_only=preferred_sheets_only,
+                aggregate=aggregate,
             )
 
             statut = self.compute_statut(
@@ -559,6 +634,23 @@ class KPIEngine:
                 "source_type":   "lookup",
             }
 
+        # ── PASS 1b : fallback ca_total depuis somme TVA ────────────────────────
+        # Si ca_total n'a pas été trouvé comme ligne de synthèse, utilise la somme
+        # des valeurs mensuelles TVA (ca_total_from_tva)
+        if self._kpis.get("ca_total", {}).get("valeur") is None:
+            tva_entry = self._kpis.get("ca_total_from_tva", {})
+            if tva_entry.get("valeur") is not None:
+                self._kpis["ca_total"]["valeur"]   = tva_entry["valeur"]
+                self._kpis["ca_total"]["onglet"]   = tva_entry.get("onglet")
+                self._kpis["ca_total"]["cellule"]  = tva_entry.get("cellule")
+                self._kpis["ca_total"]["source_type"] = "sum_mensuel"
+                self._kpis["ca_total"]["statut"] = self.compute_statut(
+                    tva_entry["valeur"], 800_000, 2_000_000,
+                )
+
+        # Même logique pour ca_tva_21 si non trouvé : essai avec hints plus larges
+        # (le module intermédiaire ca_tva_21 doit être trouvé pour les dérivés)
+
         # ── PASS 2 : KPIs dérivés (lookup direct OU formule) ─────────────────
         for kpi_id, rule in DERIVED_RULES.items():
             # 2a : essaie d'abord le lookup direct
@@ -572,6 +664,8 @@ class KPIEngine:
                     prefer_row=direct.get("prefer_row", "last"),
                     min_value=direct.get("min_value"),
                     max_value=direct.get("max_value"),
+                    preferred_sheets_only=direct.get("preferred_sheets_only", False),
+                    aggregate=direct.get("aggregate"),
                 )
                 if valeur is not None:
                     source_type = "lookup"

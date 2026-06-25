@@ -2089,18 +2089,41 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                 display_df = df_kpis.copy()
                 display_df["statut"] = display_df["statut"].apply(format_kpi_statut)
                 st.dataframe(
-                    display_df[["label_fr", "valeur", "unite", "statut", "onglet", "cellule"]],
+                    display_df[["label_fr", "valeur", "unite", "statut", "onglet", "cellule", "source_type"]],
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "label_fr": st.column_config.TextColumn("Indicateur"),
-                        "valeur": st.column_config.NumberColumn("Valeur", format="%.2f"),
-                        "unite": st.column_config.TextColumn("Unité"),
-                        "statut": st.column_config.TextColumn("Statut"),
-                        "onglet": st.column_config.TextColumn("Onglet source"),
-                        "cellule": st.column_config.TextColumn("Cellule"),
+                        "label_fr":    st.column_config.TextColumn("Indicateur"),
+                        "valeur":      st.column_config.NumberColumn("Valeur", format="%.2f"),
+                        "unite":       st.column_config.TextColumn("Unité"),
+                        "statut":      st.column_config.TextColumn("Statut"),
+                        "onglet":      st.column_config.TextColumn("Onglet source"),
+                        "cellule":     st.column_config.TextColumn("Cellule"),
+                        "source_type": st.column_config.TextColumn("Type"),
                     },
                 )
+
+                # ── Diagnostic : en-têtes de colonnes trouvées ────────────────
+                all_headers = kpi_engine.list_all_headers()
+                if all_headers:
+                    with st.expander("🔍 Diagnostic — colonnes détectées dans les fichiers Excel", expanded=False):
+                        st.caption(
+                            "Utilisez ces noms de colonnes pour remplir le VU_MAPPING de votre méthodologie. "
+                            "Si un KPI est 'Inconnu', recherchez le bon nom ici et ajoutez-le."
+                        )
+                        for sheet_name, headers in all_headers.items():
+                            # Affiche les 5 premiers caractères du nom pour éviter les noms trop longs
+                            short_name = sheet_name if len(sheet_name) <= 60 else sheet_name[:57] + "..."
+                            st.markdown(f"**`{short_name}`**")
+                            # Affiche les en-têtes en ligne
+                            header_str = " · ".join(
+                                f"`{h}`" for h in headers
+                                if h and str(h).strip() and str(h).strip() != "nan"
+                            )
+                            if header_str:
+                                st.markdown(header_str)
+                            else:
+                                st.caption("_(aucun en-tête textuel détecté)_")
 
                 # ── Checklist de disponibilité des données ────────────────
                 st.write("  📋 Vérification de la couverture des données par slide...")
