@@ -168,31 +168,22 @@ RAW_RULES: dict = {
         "min_value": 50_000,
         "preferred_sheets_only": True,
     },
-    "ca_par_etp": {
-        "label_fr": "CA par ETP",
-        "unite": "€",
-        "seuil_bas": 300_000,
-        "seuil_haut": 420_000,
-        "sheet_hints": ["ETP", "RH", "Financier", "CA"],
+    # ── ETP (nb équivalents temps plein) — utilisé pour calculer CA/ETP et marge/ETP ──
+    "nb_etp": {
+        "label_fr": "Nombre d'ETP",
+        "unite": "ETP",
+        "_raw_only": True,   # intermédiaire, utilisé par les formules dérivées
+        "seuil_bas": 0,
+        "seuil_haut": 99_999,
+        "sheet_hints": ["ETP", "RH", "Ressources humaines", "Personnel", "Effectifs"],
         "header_hints": [
-            "ca/etp", "ca par etp", "ca etp", "chiffre par etp",
-            "ca par equivalent", "ca / etp",
+            "etp", "nb etp", "nombre etp", "effectif etp",
+            "equivalent temps plein", "équivalent temps plein",
+            "etp total", "total etp", "etp annuel",
         ],
         "prefer_row": "last",
-        "min_value": 10_000,
-    },
-    "marge_par_etp": {
-        "label_fr": "Marge par ETP",
-        "unite": "€",
-        "seuil_bas": 80_000,
-        "seuil_haut": 130_000,
-        "sheet_hints": ["ETP", "RH", "Marge"],
-        "header_hints": [
-            "marge/etp", "marge par etp", "marge etp",
-            "mb par etp", "mb / etp",
-        ],
-        "prefer_row": "last",
-        "min_value": 5_000,
+        "min_value": 0.5,
+        "max_value": 200,
     },
     # ── Paniers (lookup direct si présents comme colonne calculée) ───────────
     "panier_moyen_direct": {
@@ -394,6 +385,49 @@ DERIVED_RULES: dict = {
         ),
         "formula_deps": ["ca_tva_21", "nb_transactions_ordos"],
         "formula_source": "ca_tva_21 / nb_transactions_ordos",
+    },
+    # ── CA et Marge par ETP (ratio ca_total ou marge_brute / nb_etp) ─────────
+    "ca_par_etp": {
+        "label_fr": "CA par ETP",
+        "unite": "€",
+        "seuil_bas": 300_000,
+        "seuil_haut": 420_000,
+        "direct_hints": {
+            "sheet_hints": ["ETP", "RH", "Financier"],
+            "header_hints": ["ca/etp", "ca par etp", "ca etp", "ca / etp"],
+            "prefer_row": "last",
+            "min_value": 10_000,
+            "max_value": 2_000_000,
+        },
+        "formula": lambda kpis: (
+            round(kpis["ca_total"]["valeur"] / kpis["nb_etp"]["valeur"], 2)
+            if (kpis.get("ca_total", {}).get("valeur") is not None
+                and kpis.get("nb_etp", {}).get("valeur") not in (None, 0))
+            else None
+        ),
+        "formula_deps": ["ca_total", "nb_etp"],
+        "formula_source": "ca_total / nb_etp",
+    },
+    "marge_par_etp": {
+        "label_fr": "Marge par ETP",
+        "unite": "€",
+        "seuil_bas": 80_000,
+        "seuil_haut": 130_000,
+        "direct_hints": {
+            "sheet_hints": ["ETP", "RH", "Marge"],
+            "header_hints": ["marge/etp", "marge par etp", "marge etp", "mb par etp", "mb / etp"],
+            "prefer_row": "last",
+            "min_value": 5_000,
+            "max_value": 1_000_000,
+        },
+        "formula": lambda kpis: (
+            round(kpis["marge_brute"]["valeur"] / kpis["nb_etp"]["valeur"], 2)
+            if (kpis.get("marge_brute", {}).get("valeur") is not None
+                and kpis.get("nb_etp", {}).get("valeur") not in (None, 0))
+            else None
+        ),
+        "formula_deps": ["marge_brute", "nb_etp"],
+        "formula_source": "marge_brute / nb_etp",
     },
     "panier_conseil": {
         "label_fr": "Panier moyen conseil (hors ordos)",

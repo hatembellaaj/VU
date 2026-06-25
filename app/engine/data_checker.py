@@ -417,12 +417,16 @@ DEFAULT_METHODOLOGY_MAPPING = {
         "colonnes": ["Évolution marge", "Evolution marge (%)", "Var. marge"],
         "onglets":  ["Marge", "CA", "Evolution"]
     },
+    "nb_etp": {
+        "colonnes": ["ETP", "Nb ETP", "Nombre ETP", "Équivalent temps plein", "Total ETP"],
+        "onglets":  ["ETP", "RH", "Ressources humaines", "Personnel", "Effectifs"]
+    },
     "ca_par_etp": {
-        "colonnes": ["CA/ETP", "CA par ETP", "Chiffre par équivalent temps plein"],
+        "colonnes": ["CA/ETP", "CA par ETP", "Calculé: ca_total / nb_etp"],
         "onglets":  ["ETP", "RH", "Financier", "CA"]
     },
     "marge_par_etp": {
-        "colonnes": ["Marge/ETP", "Marge par ETP"],
+        "colonnes": ["Marge/ETP", "Marge par ETP", "Calculé: marge_brute / nb_etp"],
         "onglets":  ["ETP", "RH", "Marge"]
     },
     # ── KPIs dérivés (calculés depuis les intermédiaires) ─────────────────────

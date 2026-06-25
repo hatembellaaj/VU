@@ -156,6 +156,16 @@ def load_kpis(project_id: str) -> Optional[dict]:
     return _read_json(_project_dir(project_id) / "kpis.json")
 
 
+def save_mapping_overrides(project_id: str, overrides: dict) -> None:
+    """Sauvegarde les corrections de mapping colonnes (Phase 2) pour ce projet."""
+    _write_json(_project_dir(project_id) / "mapping_overrides.json", overrides)
+
+
+def load_mapping_overrides(project_id: str) -> Optional[dict]:
+    """Charge les corrections de mapping colonnes sauvegardées."""
+    return _read_json(_project_dir(project_id) / "mapping_overrides.json")
+
+
 def save_slides(project_id: str, slides: list) -> None:
     _write_json(_project_dir(project_id) / "slides.json", slides)
 
@@ -210,6 +220,10 @@ def session_to_project(project_id: str, session: dict) -> None:
     if kpis:
         save_kpis(project_id, kpis)
 
+    overrides = session.get("lot2_mapping_overrides")
+    if overrides:
+        save_mapping_overrides(project_id, overrides)
+
     slides = session.get("lot2_slides")
     if slides:
         save_slides(project_id, slides)
@@ -246,6 +260,11 @@ def project_to_session(project_id: str, session: dict) -> dict:
     if kpis:
         session["lot2_kpis"] = kpis
         updated["kpis"] = True
+
+    overrides = load_mapping_overrides(project_id)
+    if overrides:
+        session["lot2_mapping_overrides"] = overrides
+        updated["mapping_overrides"] = True
 
     slides = load_slides(project_id)
     if slides:

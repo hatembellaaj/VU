@@ -2099,6 +2099,8 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
         # Build mapping DataFrame for the editable table
         mapping_rows_p2 = st.session_state.get("lot2_mapping_rows") or []
+        # Pre-fill saved overrides (from previous session or last compute)
+        saved_overrides = st.session_state.get("lot2_mapping_overrides") or {}
         mapping_records = []
         for row in mapping_rows_p2:
             if row.get("_raw_only"):
@@ -2110,15 +2112,17 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                 statut_display = "🔁 Calculé (formule)"
             else:
                 statut_display = "❌ Non trouvé"
+            kpi_id = row.get("kpi_id", "")
+            prev = saved_overrides.get(kpi_id, {})
             mapping_records.append({
-                "kpi_id":            row.get("kpi_id", ""),
+                "kpi_id":            kpi_id,
                 "Indicateur":        row.get("label_fr", ""),
                 "Unité":             row.get("unite", ""),
                 "Statut":            statut_display,
                 "Onglet détecté":    row.get("onglet_auto", ""),
                 "Colonne détectée":  row.get("colonne_auto", ""),
-                "Onglet corrigé":    "",
-                "Colonne corrigée":  "",
+                "Onglet corrigé":    prev.get("onglet", ""),
+                "Colonne corrigée":  prev.get("colonne", ""),
             })
 
         mapping_df = pd.DataFrame(mapping_records) if mapping_records else pd.DataFrame(
@@ -2178,20 +2182,14 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                                 })
                         raw_excel_data["sheets"]["Questionnaire"] = quant_sheet
 
-                    # Enrichir les règles KPI avec le mapping de la méthodologie
-                    methodology_for_mapping = st.session_state.get("methodology_text", "")
-                    methodo_mapping = parse_mapping_from_methodology(methodology_for_mapping)
-                    if methodo_mapping:
-                        st.write(f"  📐 Mapping méthodologie détecté — {len(methodo_mapping)} KPI(s) enrichis")
-                        from engine.kpi_engine import DEFAULT_RULES
-                        enriched_rules = enrich_kpi_rules(DEFAULT_RULES, methodo_mapping)
-                    else:
-                        enriched_rules = None
-                        st.write("  ℹ️ Pas de mapping méthodologie — utilisation des hints par défaut")
+                    # Les règles KPI sont fixes (kpi_engine.py) — indépendantes de la méthodologie.
+                    # La méthodologie sert uniquement au narratif LLM, pas à la détection de colonnes.
+                    # Les corrections viennent exclusivement des overrides utilisateur (Phase 2).
+                    methodo_mapping = None   # conservé pour check_slides_data uniquement
 
                     kpi_engine = KPIEngine(
                         raw_data=raw_excel_data,
-                        rules=enriched_rules,
+                        rules=None,   # utilise DEFAULT_RULES (RAW_RULES)
                     )
                     kpis = kpi_engine.compute_all(overrides=overrides)
                     st.session_state["lot2_kpis"] = kpis
@@ -2231,10 +2229,12 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     else:
                         st.write(f"  ✅ Couverture données : {n_ok_check} slides complètes")
 
-                    # Auto-save KPIs dans le projet actif
+                    # Auto-save KPIs + overrides dans le projet actif
                     pid = st.session_state.get("current_project_id")
                     if pid:
                         pm.save_kpis(pid, kpis)
+                        if overrides:
+                            pm.save_mapping_overrides(pid, overrides)
 
                     st.session_state["lot2_kpis_computed"] = True
 
