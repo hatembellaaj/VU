@@ -125,24 +125,25 @@ RAW_RULES: dict = {
         "unite": "%",
         "seuil_bas": -2.0,
         "seuil_haut": 5.0,
-        "sheet_hints": ["Evolution", "Évolution", "Synthese", "Synthèse", "Bilan"],
+        # Cherche exclusivement dans des feuilles d'évolution/synthèse
+        # (jamais dans les transactions brutes "Toutes les ventes")
+        "sheet_hints": ["Evolution", "Évolution", "Synthese", "Synthèse", "Bilan", "Comparatif"],
         "header_hints": [
             "evolution ca", "évolution ca", "variation ca", "croissance ca",
             "var ca", "delta ca", "evol ca", "% évolution ca",
-            "evol ca %", "ca evol",
+            "evol ca %", "ca evol", "% variation ca",
         ],
         "prefer_row": "last",
         "min_value": -100,
         "max_value": 200,
-        # Ne cherche PAS dans les fichiers de transactions brutes
-        "preferred_sheets_only": True,
+        "preferred_sheets_only": True,   # JAMAIS dans les transactions brutes
     },
     "evolution_marge_pct": {
         "label_fr": "Évolution marge brute (%)",
         "unite": "%",
         "seuil_bas": -2.0,
         "seuil_haut": 5.0,
-        "sheet_hints": ["Marge", "Evolution", "Évolution", "Synthese"],
+        "sheet_hints": ["Marge", "Evolution", "Évolution", "Synthese", "Comparatif"],
         "header_hints": [
             "evolution marge", "évolution marge", "variation marge",
             "var marge", "delta marge", "evol marge", "% évolution marge",
@@ -157,10 +158,11 @@ RAW_RULES: dict = {
         "unite": "€",
         "seuil_bas": 200_000,
         "seuil_haut": 600_000,
-        "sheet_hints": ["Marge", "CA", "Financier", "Résultats", "Synthese"],
+        "sheet_hints": ["Marge", "Financier", "Résultats", "Synthese", "Synthèse", "Bilan"],
         "header_hints": [
             "marge brute", "marge brute ht", "marge ht totale",
             "mb total", "marge totale", "total marge", "marge globale",
+            "marge ht", "mb ht",
         ],
         "prefer_row": "max",
         "min_value": 50_000,
@@ -552,25 +554,176 @@ class KPIEngine:
                                     cell_ref = nc["ref"]
                                     break
 
-                        return chosen_val, sheet_name, cell_ref
+                        # Retourne aussi le nom exact de la colonne matchée
+                        return chosen_val, sheet_name, cell_ref, str(header)
 
         # ── PAS DE FALLBACK HEURISTIQUE ─────────────────────────────────────
         # Retourner None proprement plutôt que de deviner une valeur incorrecte
-        return None, None, None
+        return None, None, None, None
+
+    def _find_exact(
+        self,
+        sheet_key: str,
+        col_name: str,
+        prefer_row: str = "sum",
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+    ) -> tuple:
+        """
+        Recherche exacte par nom d'onglet et nom de colonne (fournis par l'utilisateur).
+        Comparaison insensible à la casse et aux accents.
+
+        Returns (value, sheet_key, cell_ref, col_name) or (None, None, None, None).
+        """
+        sheets = self.raw_data.get("sheets", {})
+        norm_sheet = self._normalize_str(sheet_key)
+        norm_col   = self._normalize_str(col_name)
+
+        for sname, sdata in sheets.items():
+            if self._normalize_str(sname) != norm_sheet:
+                continue
+            headers = sdata.get("headers", [])
+            rows    = sdata.get("rows", [])
+            numeric_cells = sdata.get("numeric_cells", [])
+
+            for col_idx, header in enumerate(headers):
+                if self._normalize_str(header) != norm_col:
+                    continue
+
+                candidates = []
+                for row_idx, row in enumerate(rows):
+                    if col_idx < len(row):
+                        val = row[col_idx]
+                        if isinstance(val, (int, float)) and not isinstance(val, bool):
+                            fval = float(val)
+                            if min_value is not None and fval < min_value:
+                                continue
+                            if max_value is not None and fval > max_value:
+                                continue
+                            candidates.append((fval, row_idx))
+
+                if not candidates:
+                    return None, None, None, None
+
+                do_sum = (prefer_row == "sum")
+                if do_sum:
+                    chosen_val = round(sum(v for v, _ in candidates), 2)
+                    cell_ref = f"SUM({len(candidates)} lignes)"
+                elif prefer_row == "last":
+                    chosen_val, _ = candidates[-1]
+                    cell_ref = None
+                    for nc in numeric_cells:
+                        if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                            cell_ref = nc["ref"]
+                            break
+                elif prefer_row == "max":
+                    chosen_val, _ = max(candidates, key=lambda x: abs(x[0]))
+                    cell_ref = None
+                    for nc in numeric_cells:
+                        if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                            cell_ref = nc["ref"]
+                            break
+                else:  # first
+                    chosen_val, _ = candidates[0]
+                    cell_ref = None
+                    for nc in numeric_cells:
+                        if abs(nc["valeur"] - chosen_val) < 0.001 and nc["col"] == col_idx + 1:
+                            cell_ref = nc["ref"]
+                            break
+
+                return chosen_val, sname, cell_ref, col_name
+
+        return None, None, None, None
 
     def list_all_headers(self) -> dict:
         """
         Retourne tous les en-têtes de colonnes trouvés dans chaque feuille.
-        Utile pour le diagnostic : permet d'identifier les vrais noms de colonnes Excel.
-
         Returns: {sheet_name: [header, ...]}
         """
         result = {}
         for sname, sdata in self.raw_data.get("sheets", {}).items():
-            headers = [h for h in sdata.get("headers", []) if h and str(h).strip()]
+            headers = [
+                str(h).strip() for h in sdata.get("headers", [])
+                if h and str(h).strip() and str(h).strip().lower() != "nan"
+            ]
             if headers:
                 result[sname] = headers
         return result
+
+    def detect_mapping(self) -> list:
+        """
+        Dry-run : détecte quelle colonne/onglet correspond à chaque KPI
+        sans modifier l'état interne. Retourne une liste de dicts pour
+        alimenter le tableau de mapping utilisateur.
+
+        Returns list of {
+            kpi_id, label_fr, unite,
+            found,           # bool — détection auto réussie
+            source_type,     # "lookup" | "derived" | "not_found"
+            onglet_auto,     # onglet détecté (ou "")
+            colonne_auto,    # colonne détectée (ou "")
+            value_preview,   # valeur numérique ou None
+            _raw_only,       # bool — KPI intermédiaire non affiché normalement
+        }
+        """
+        rows = []
+
+        # Pass 1 : raw rules
+        for kpi_id, rule in self.rules.items():
+            val, sheet, _, col = self._find_value_in_sheets(
+                rule.get("header_hints", []),
+                rule.get("sheet_hints", []),
+                prefer_row=rule.get("prefer_row", "first"),
+                min_value=rule.get("min_value"),
+                max_value=rule.get("max_value"),
+                preferred_sheets_only=rule.get("preferred_sheets_only", False),
+                aggregate=rule.get("aggregate"),
+            )
+            rows.append({
+                "kpi_id":       kpi_id,
+                "label_fr":     rule["label_fr"],
+                "unite":        rule["unite"],
+                "found":        val is not None,
+                "source_type":  "lookup" if val is not None else "not_found",
+                "onglet_auto":  sheet or "",
+                "colonne_auto": col or "",
+                "value_preview": val,
+                "_raw_only":    rule.get("_raw_only", False),
+            })
+
+        # Pass 2 : derived rules (direct hints only for detection)
+        for kpi_id, rule in DERIVED_RULES.items():
+            direct = rule.get("direct_hints", {})
+            val, sheet, _, col = (None, None, None, None)
+            if direct:
+                val, sheet, _, col = self._find_value_in_sheets(
+                    direct.get("header_hints", []),
+                    direct.get("sheet_hints", []),
+                    prefer_row=direct.get("prefer_row", "last"),
+                    min_value=direct.get("min_value"),
+                    max_value=direct.get("max_value"),
+                    preferred_sheets_only=direct.get("preferred_sheets_only", False),
+                )
+
+            # Check formula deps availability
+            is_computable = False
+            if val is None and "formula_deps" in rule:
+                # Check if all deps would be found (rough check)
+                is_computable = True  # optimistic — will be confirmed at compute time
+
+            rows.append({
+                "kpi_id":       kpi_id,
+                "label_fr":     rule["label_fr"],
+                "unite":        rule["unite"],
+                "found":        val is not None or is_computable,
+                "source_type":  "lookup" if val is not None else ("derived" if is_computable else "not_found"),
+                "onglet_auto":  sheet or "",
+                "colonne_auto": col or "",
+                "value_preview": val,
+                "_raw_only":    False,
+            })
+
+        return rows
 
     # ── Status helper ────────────────────────────────────────────────────────
 
@@ -585,33 +738,48 @@ class KPIEngine:
 
     # ── Main computation ─────────────────────────────────────────────────────
 
-    def compute_all(self) -> dict:
+    def compute_all(self, overrides: Optional[dict] = None) -> dict:
         """
         Compute all KPIs (raw + derived).
+
+        Args:
+            overrides: dict {kpi_id: {"onglet": str, "colonne": str, "prefer_row": str}}
+                       Spécifications exactes fournies par l'utilisateur. Prennent la
+                       priorité sur la détection automatique par hints.
 
         Returns dict of kpi_id -> KPI entry.
         """
         self._kpis = {}
+        overrides = overrides or {}
         source_fichier = self.raw_data.get("source", "inconnu")
 
-        # ── PASS 1 : KPIs bruts (lookup direct) ─────────────────────────────
-        for kpi_id, rule in self.rules.items():
-            header_hints           = rule.get("header_hints", [])
-            sheet_hints            = rule.get("sheet_hints", [])
-            prefer_row             = rule.get("prefer_row", "first")
-            min_value              = rule.get("min_value")
-            max_value              = rule.get("max_value")
-            preferred_sheets_only  = rule.get("preferred_sheets_only", False)
-            aggregate              = rule.get("aggregate")
-
-            valeur, onglet, cellule = self._find_value_in_sheets(
-                header_hints, sheet_hints,
-                prefer_row=prefer_row,
-                min_value=min_value,
-                max_value=max_value,
-                preferred_sheets_only=preferred_sheets_only,
-                aggregate=aggregate,
+        def _lookup_raw(kpi_id: str, rule: dict) -> tuple:
+            """Retourne (valeur, onglet, cellule, matched_col) pour un KPI brut."""
+            ov = overrides.get(kpi_id, {})
+            if ov.get("onglet") and ov.get("colonne"):
+                # Override utilisateur : recherche exacte
+                v, s, c, col = self._find_exact(
+                    ov["onglet"], ov["colonne"],
+                    prefer_row=ov.get("prefer_row", rule.get("prefer_row", "sum")),
+                    min_value=rule.get("min_value"),
+                    max_value=rule.get("max_value"),
+                )
+                return v, s, c, col, "override"
+            # Détection automatique
+            v, s, c, col = self._find_value_in_sheets(
+                rule.get("header_hints", []),
+                rule.get("sheet_hints", []),
+                prefer_row=rule.get("prefer_row", "first"),
+                min_value=rule.get("min_value"),
+                max_value=rule.get("max_value"),
+                preferred_sheets_only=rule.get("preferred_sheets_only", False),
+                aggregate=rule.get("aggregate"),
             )
+            return v, s, c, col, "lookup"
+
+        # ── PASS 1 : KPIs bruts ──────────────────────────────────────────────
+        for kpi_id, rule in self.rules.items():
+            valeur, onglet, cellule, matched_col, src_type = _lookup_raw(kpi_id, rule)
 
             statut = self.compute_statut(
                 valeur,
@@ -620,72 +788,84 @@ class KPIEngine:
             )
 
             self._kpis[kpi_id] = {
-                "kpi_id":        kpi_id,
-                "label_fr":      rule["label_fr"],
-                "valeur":        valeur,
-                "unite":         rule["unite"],
-                "statut":        statut,
-                "seuil_bas":     rule.get("seuil_bas", 0),
-                "seuil_haut":    rule.get("seuil_haut", 999_999_999),
+                "kpi_id":         kpi_id,
+                "label_fr":       rule["label_fr"],
+                "valeur":         valeur,
+                "unite":          rule["unite"],
+                "statut":         statut,
+                "seuil_bas":      rule.get("seuil_bas", 0),
+                "seuil_haut":     rule.get("seuil_haut", 999_999_999),
                 "source_fichier": source_fichier,
-                "onglet":        onglet,
-                "cellule":       cellule,
-                "_raw_only":     rule.get("_raw_only", False),
-                "source_type":   "lookup",
+                "onglet":         onglet,
+                "cellule":        cellule,
+                "matched_col":    matched_col,
+                "_raw_only":      rule.get("_raw_only", False),
+                "source_type":    src_type,
             }
 
-        # ── PASS 1b : fallback ca_total depuis somme TVA ────────────────────────
-        # Si ca_total n'a pas été trouvé comme ligne de synthèse, utilise la somme
-        # des valeurs mensuelles TVA (ca_total_from_tva)
+        # ── PASS 1b : fallback ca_total depuis somme TVA mensuelles ──────────
         if self._kpis.get("ca_total", {}).get("valeur") is None:
             tva_entry = self._kpis.get("ca_total_from_tva", {})
             if tva_entry.get("valeur") is not None:
-                self._kpis["ca_total"]["valeur"]   = tva_entry["valeur"]
-                self._kpis["ca_total"]["onglet"]   = tva_entry.get("onglet")
-                self._kpis["ca_total"]["cellule"]  = tva_entry.get("cellule")
+                self._kpis["ca_total"]["valeur"]      = tva_entry["valeur"]
+                self._kpis["ca_total"]["onglet"]      = tva_entry.get("onglet")
+                self._kpis["ca_total"]["cellule"]     = tva_entry.get("cellule")
+                self._kpis["ca_total"]["matched_col"] = tva_entry.get("matched_col")
                 self._kpis["ca_total"]["source_type"] = "sum_mensuel"
                 self._kpis["ca_total"]["statut"] = self.compute_statut(
                     tva_entry["valeur"], 800_000, 2_000_000,
                 )
 
-        # Même logique pour ca_tva_21 si non trouvé : essai avec hints plus larges
-        # (le module intermédiaire ca_tva_21 doit être trouvé pour les dérivés)
-
         # ── PASS 2 : KPIs dérivés (lookup direct OU formule) ─────────────────
         for kpi_id, rule in DERIVED_RULES.items():
-            # 2a : essaie d'abord le lookup direct
-            direct = rule.get("direct_hints", {})
-            valeur, onglet, cellule, source_type = None, None, None, None
+            ov = overrides.get(kpi_id, {})
+            valeur, onglet, cellule, matched_col, source_type = None, None, None, None, None
 
-            if direct:
-                valeur, onglet, cellule = self._find_value_in_sheets(
-                    direct.get("header_hints", []),
-                    direct.get("sheet_hints", []),
-                    prefer_row=direct.get("prefer_row", "last"),
-                    min_value=direct.get("min_value"),
-                    max_value=direct.get("max_value"),
-                    preferred_sheets_only=direct.get("preferred_sheets_only", False),
-                    aggregate=direct.get("aggregate"),
+            # 2a : override utilisateur → recherche exacte
+            if ov.get("onglet") and ov.get("colonne"):
+                all_rules_merged = {**self.rules, **DERIVED_RULES}
+                ref_rule = all_rules_merged.get(kpi_id, rule)
+                valeur, onglet, cellule, matched_col = self._find_exact(
+                    ov["onglet"], ov["colonne"],
+                    prefer_row=ov.get("prefer_row", "last"),
+                    min_value=rule.get("seuil_bas"),
+                    max_value=rule.get("seuil_haut"),
                 )
                 if valeur is not None:
-                    source_type = "lookup"
+                    source_type = "override"
 
-            # 2b : si lookup raté → formule
+            # 2b : lookup par hints directs
+            if valeur is None:
+                direct = rule.get("direct_hints", {})
+                if direct:
+                    valeur, onglet, cellule, matched_col = self._find_value_in_sheets(
+                        direct.get("header_hints", []),
+                        direct.get("sheet_hints", []),
+                        prefer_row=direct.get("prefer_row", "last"),
+                        min_value=direct.get("min_value"),
+                        max_value=direct.get("max_value"),
+                        preferred_sheets_only=direct.get("preferred_sheets_only", False),
+                        aggregate=direct.get("aggregate"),
+                    )
+                    if valeur is not None:
+                        source_type = "lookup"
+
+            # 2c : formule dérivée
             if valeur is None and "formula" in rule:
                 try:
                     computed = rule["formula"](self._kpis)
                     if computed is not None:
                         valeur = computed
                         source_type = "computed"
-                        # Récupère les onglets sources
                         deps = rule.get("formula_deps", [])
                         onglets_src = [
                             self._kpis[d]["onglet"]
                             for d in deps
                             if d in self._kpis and self._kpis[d].get("onglet")
                         ]
-                        onglet  = " + ".join(set(onglets_src)) if onglets_src else "calculé"
-                        cellule = rule.get("formula_source", "formule")
+                        onglet   = " + ".join(set(filter(None, onglets_src))) or "calculé"
+                        cellule  = rule.get("formula_source", "formule")
+                        matched_col = rule.get("formula_source", "")
                 except Exception:
                     valeur = None
 
@@ -696,18 +876,19 @@ class KPIEngine:
             )
 
             self._kpis[kpi_id] = {
-                "kpi_id":        kpi_id,
-                "label_fr":      rule["label_fr"],
-                "valeur":        valeur,
-                "unite":         rule["unite"],
-                "statut":        statut,
-                "seuil_bas":     rule.get("seuil_bas", 0),
-                "seuil_haut":    rule.get("seuil_haut", 999_999_999),
+                "kpi_id":         kpi_id,
+                "label_fr":       rule["label_fr"],
+                "valeur":         valeur,
+                "unite":          rule["unite"],
+                "statut":         statut,
+                "seuil_bas":      rule.get("seuil_bas", 0),
+                "seuil_haut":     rule.get("seuil_haut", 999_999_999),
                 "source_fichier": source_fichier,
-                "onglet":        onglet,
-                "cellule":       cellule,
-                "_raw_only":     False,
-                "source_type":   source_type or "inconnu",
+                "onglet":         onglet,
+                "cellule":        cellule,
+                "matched_col":    matched_col,
+                "_raw_only":      False,
+                "source_type":    source_type or "inconnu",
             }
 
         return self._kpis
@@ -726,10 +907,12 @@ class KPIEngine:
         if not records:
             return pd.DataFrame(columns=[
                 "kpi_id", "label_fr", "valeur", "unite", "statut",
-                "seuil_bas", "seuil_haut", "source_fichier", "onglet", "cellule", "source_type",
+                "seuil_bas", "seuil_haut", "source_fichier", "onglet", "cellule",
+                "matched_col", "source_type",
             ])
 
         df = pd.DataFrame(records)
         cols = ["kpi_id", "label_fr", "valeur", "unite", "statut",
-                "seuil_bas", "seuil_haut", "source_fichier", "onglet", "cellule", "source_type"]
+                "seuil_bas", "seuil_haut", "source_fichier", "onglet", "cellule",
+                "matched_col", "source_type"]
         return df[[c for c in cols if c in df.columns]]

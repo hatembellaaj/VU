@@ -13,23 +13,25 @@ class AuditEngine:
         Extract all numbers from text with surrounding context.
 
         Returns list of (number_float, context_str) tuples.
+
+        Exclusions :
+        - "N-1", "N-2" (comptabilité française) : précédé d'une lettre → ignoré
+        - Intervalles du type "19–21" : seul le premier nombre est gardé (pas le second)
         """
-        # Pattern: optional sign, digits with optional thousands separator, optional decimal
-        pattern = r"[-+]?\d[\d\s ]*(?:[.,]\d+)?"
+        # (?<![A-Za-z/]) — ne pas matcher si précédé d'une lettre (évite "N-1" → -1)
+        pattern = r"(?<![A-Za-z/])[-+]?\d[\d\s\xa0]*(?:[.,]\d+)?"
         results = []
         for match in re.finditer(pattern, text):
             raw = match.group().strip()
             # Normalize: remove thousands separators (spaces, non-breaking spaces)
             normalized = (
-                raw.replace(" ", "")
+                raw.replace(" ", "")
                 .replace("\xa0", "")
-                .replace(" ", "")
+                .replace(" ", "")
                 .replace(",", ".")
             )
             try:
                 value = float(normalized)
-                # Ignore trivially small integers used as ordinals/years/counts (1, 2, 3 etc.)
-                # We keep them because even small numbers must be validated
                 start = max(0, match.start() - 50)
                 end = min(len(text), match.end() + 50)
                 context = text[start:end].replace("\n", " ")
@@ -79,7 +81,8 @@ class AuditEngine:
     def _extract_allowed_from_sources(self, *source_texts: str) -> set:
         """
         Extrait tous les nombres présents dans les textes sources (PDF contexte,
-        questionnaire brut, etc.) et les retourne comme ensemble de valeurs autorisées.
+        questionnaire brut, méthodologie, descriptions slides) et les retourne
+        comme ensemble de valeurs autorisées.
         Ces nombres ne sont pas des KPIs mais sont des faits légitimes cités dans le
         document d'entrée — ils ne doivent pas être marqués comme hallucinations.
         """
@@ -90,8 +93,24 @@ class AuditEngine:
             for value, _ in self._extract_numbers_with_context(text):
                 allowed.add(round(value, 2))
                 allowed.add(round(value, 0))
-                allowed.add(int(value) if value == int(value) else value)
+                try:
+                    allowed.add(int(value) if value == int(value) else value)
+                except (OverflowError, ValueError):
+                    pass
         return allowed
+
+    def _build_slide_descriptions_text(self) -> str:
+        """
+        Retourne les descriptions hardcodées des slides (PERFORMANCE_GLOBALE_SLIDES)
+        comme texte source pour le whitelist — les benchmarks marché y sont définis.
+        """
+        try:
+            from generation.llm_generator import PERFORMANCE_GLOBALE_SLIDES
+            return "\n".join(
+                slide.get("description", "") for slide in PERFORMANCE_GLOBALE_SLIDES
+            )
+        except Exception:
+            return ""
 
     def audit(
         self,
@@ -111,6 +130,7 @@ class AuditEngine:
                                     Numbers found here are whitelisted — they are
                                     legitimate source facts, not hallucinations.
             questionnaire_raw_text: Raw questionnaire text (optional, same logic).
+            methodology_text:       Methodology markdown (benchmarks whitelisted).
 
         Returns:
             {
@@ -133,10 +153,17 @@ class AuditEngine:
             }
 
         # Nombres présents dans les documents sources → autorisés sans vérification KPI
-        # La méthodologie contient les benchmarks marché (40,8€, 180 clients/j…)
-        # qui sont des références légitimes, pas des hallucinations
+        # Inclut :
+        #   - PDF contexte (données pharmacie spécifiques)
+        #   - Questionnaire brut
+        #   - Méthodologie (benchmarks marché 40,8€, 180 clients/j…)
+        #   - Descriptions slides (benchmarks hardcodés 350-380k€ CA/ETP, 13,89€ panier…)
+        slide_descriptions_text = self._build_slide_descriptions_text()
         source_whitelist = self._extract_allowed_from_sources(
-            context_text, questionnaire_raw_text, methodology_text
+            context_text,
+            questionnaire_raw_text,
+            methodology_text,
+            slide_descriptions_text,
         )
 
         extracted = self._extract_numbers_with_context(generated_content)
@@ -189,7 +216,7 @@ class AuditEngine:
         rejected_list = []
 
         for number, context in non_trivial:
-            # 1. Vérifie d'abord si le nombre vient d'une source légitime (PDF contexte, questionnaire)
+            # 1. Vérifie d'abord si le nombre vient d'une source légitime
             in_whitelist = (
                 round(number, 2) in source_whitelist
                 or round(number, 0) in source_whitelist

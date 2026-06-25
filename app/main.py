@@ -60,6 +60,7 @@ def init_session_state():
         "lot1_excel_results": [],
         "lot1_pptx_texts": {},
         "lot1_image_results": [],
+        # ── Lot 2 pipeline state ─────────────────────────────────────────────
         "lot2_kpis": None,
         "lot2_slides": None,
         "lot2_audit": None,
@@ -67,8 +68,19 @@ def init_session_state():
         "lot2_pharmacy_name": "",
         "lot2_context_text": "",
         "lot2_data_check": None,
+        # Phase 1 — Parse
+        "lot2_raw_excel_data": None,      # données parsées brutes (all_excel_data)
+        "lot2_questionnaire_data": {},     # questionnaire parsé
+        "lot2_questionnaire_raw_text": "", # texte brut questionnaire
+        "lot2_parse_done": False,          # Phase 1 terminée
+        # Phase 2 — Mapping review
+        "lot2_available_headers": {},      # {sheet_name: [col1, col2, ...]}
+        "lot2_mapping_rows": None,         # detect_mapping() result
+        "lot2_mapping_overrides": {},      # {kpi_id: {onglet, colonne, prefer_row}}
+        "lot2_kpis_computed": False,       # Phase 2 terminée
+        # ── Méthodologie ─────────────────────────────────────────────────────
         "methodology_text": "",
-        # Gestion de projet
+        # ── Gestion de projet ─────────────────────────────────────────────────
         "current_project_id": None,
         "current_project_name": None,
         "project_just_loaded": False,
@@ -1834,9 +1846,9 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     f"_(modèle {get_model()})_"
                 )
 
-    # -----------------------------------------------------------------------
-    # Launch pipeline
-    # -----------------------------------------------------------------------
+    # ── Phase 1 ─────────────────────────────────────────────────────────────────
+    # Button: "Ingérer les documents" — parse only, no KPI computation
+    # ─────────────────────────────────────────────────────────────────────────────
     if not pharmacy_name:
         st.markdown(
             """
@@ -1855,22 +1867,26 @@ elif page == "🚀 Lot 2 — Générer un rapport":
             unsafe_allow_html=True,
         )
 
-    launch_disabled = not pharmacy_name
-
     st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
     if st.button(
-        "▶  Lancer le pipeline complet",
+        "📥 Ingérer les documents",
         type="primary",
-        disabled=launch_disabled,
+        disabled=not pharmacy_name,
         use_container_width=True,
     ):
-        # Reset previous results
-        st.session_state["lot2_kpis"]         = None
-        st.session_state["lot2_slides"]        = None
-        st.session_state["lot2_audit"]         = None
-        st.session_state["lot2_pptx_bytes"]    = None
-        st.session_state["lot2_context_text"]  = ""
-        st.session_state["lot2_data_check"]    = None
+        # Reset all phase state
+        st.session_state["lot2_parse_done"]           = False
+        st.session_state["lot2_kpis_computed"]        = False
+        st.session_state["lot2_kpis"]                 = None
+        st.session_state["lot2_slides"]               = None
+        st.session_state["lot2_audit"]                = None
+        st.session_state["lot2_pptx_bytes"]           = None
+        st.session_state["lot2_mapping_rows"]         = None
+        st.session_state["lot2_mapping_overrides"]    = {}
+        st.session_state["lot2_raw_excel_data"]       = None
+        st.session_state["lot2_questionnaire_data"]   = {}
+        st.session_state["lot2_questionnaire_raw_text"] = ""
+        st.session_state["lot2_available_headers"]    = {}
 
         # ===================================================================
         # STEP 1 — Parse all inputs
@@ -1969,6 +1985,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
 
             # Parse questionnaire (PDF ou JSON)
             questionnaire_data = {}
+            questionnaire_raw_text = ""
             if lot2_questionnaire_file:
                 ext = lot2_questionnaire_file.name.rsplit(".", 1)[-1].lower()
 
@@ -1985,6 +2002,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                             pdf_bytes,
                             use_llm=api_key_is_set(),
                         )
+                        questionnaire_raw_text = json.dumps(questionnaire_raw, ensure_ascii=False)
                         st.write(f"    🔍 {len(questionnaire_raw)} champ(s) détecté(s) dans le PDF")
                         # Affiche un aperçu
                         with st.expander("Aperçu questionnaire extrait du PDF", expanded=False):
@@ -2001,6 +2019,7 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                     st.write("  📋 Parsing questionnaire JSON...")
                     try:
                         raw_json = lot2_questionnaire_file.read().decode("utf-8")
+                        questionnaire_raw_text = raw_json
                         questionnaire_raw = json.loads(raw_json)
                         q_parser = QuestionnaireParser()
                         questionnaire_data = q_parser.parse(questionnaire_raw)
@@ -2014,12 +2033,34 @@ elif page == "🚀 Lot 2 — Générer un rapport":
                 if manual_json_str.strip() not in ("{}", ""):
                     try:
                         questionnaire_raw = json.loads(manual_json_str)
+                        questionnaire_raw_text = manual_json_str
                         q_parser = QuestionnaireParser()
                         questionnaire_data = q_parser.parse(questionnaire_raw)
                         total_q = sum(len(v) for v in questionnaire_data.values())
                         st.write(f"  📋 Questionnaire manuel: {total_q} réponse(s)")
                     except Exception as exc:
                         st.write(f"  ⚠️ Questionnaire manuel invalide: {exc}")
+
+            # Build detect_mapping using KPIEngine (dry-run, no questionnaire sheet yet)
+            st.write("  🗺️ Détection du mapping KPI...")
+            try:
+                _mapping_engine = KPIEngine(raw_data=all_excel_data)
+                mapping_rows = _mapping_engine.detect_mapping()
+                available_headers = _mapping_engine.list_all_headers()
+                st.write(f"    ✅ {len(mapping_rows)} KPI(s) analysés")
+            except Exception as exc:
+                mapping_rows = []
+                available_headers = {}
+                st.write(f"    ⚠️ Erreur détection mapping: {exc}")
+
+            # Store parsed data in session state
+            st.session_state["lot2_raw_excel_data"]        = all_excel_data
+            st.session_state["lot2_questionnaire_data"]    = questionnaire_data
+            st.session_state["lot2_questionnaire_raw_text"] = questionnaire_raw_text
+            st.session_state["lot2_mapping_rows"]          = mapping_rows
+            st.session_state["lot2_available_headers"]     = available_headers
+            st.session_state["lot2_parse_done"]            = True
+            st.session_state["lot2_pharmacy_name"]         = pharmacy_name
 
             if parse_errors:
                 status.update(
@@ -2029,320 +2070,451 @@ elif page == "🚀 Lot 2 — Générer un rapport":
             else:
                 status.update(label="Étape 1 — Parsing terminé ✅", state="complete")
 
-        # ===================================================================
-        # STEP 2 — Compute KPIs
-        # ===================================================================
-        with st.status("Étape 2 — Calcul des KPIs...", expanded=True) as status:
-            st.write("Initialisation du moteur KPI...")
+    # ── Phase 2 ─────────────────────────────────────────────────────────────────
+    # Shown after Phase 1 is done — mapping review + KPI computation
+    # ─────────────────────────────────────────────────────────────────────────────
+    if st.session_state.get("lot2_parse_done"):
+        st.markdown("---")
+        st.markdown(
+            "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+            "letter-spacing:0.12em;margin:0.5rem 0 0.75rem;'>Phase 2 — Vérification du mapping de données</div>",
+            unsafe_allow_html=True,
+        )
 
-            try:
-                # Enrich raw_data with questionnaire numeric values
-                if questionnaire_data.get("numerique"):
-                    quant_sheet = {"headers": ["indicateur", "valeur"], "rows": [], "numeric_cells": []}
-                    for i, (qkey, qval) in enumerate(questionnaire_data["numerique"].items(), start=2):
-                        v = qval.get("valeur")
-                        quant_sheet["rows"].append([qkey, v])
-                        if isinstance(v, (int, float)):
-                            quant_sheet["numeric_cells"].append({
-                                "ref": f"B{i}",
-                                "valeur": float(v),
-                                "sheet": "Questionnaire",
-                                "row": i,
-                                "col": 2,
-                            })
-                    all_excel_data["sheets"]["Questionnaire"] = quant_sheet
+        # Show available headers
+        available_headers_p2 = st.session_state.get("lot2_available_headers", {})
+        if available_headers_p2:
+            with st.expander("📂 Colonnes disponibles dans les fichiers", expanded=False):
+                for sheet_name, headers in available_headers_p2.items():
+                    short_name = sheet_name if len(sheet_name) <= 60 else sheet_name[:57] + "..."
+                    st.markdown(f"**`{short_name}`**")
+                    header_str = " · ".join(
+                        f"`{h}`" for h in headers
+                        if h and str(h).strip() and str(h).strip() != "nan"
+                    )
+                    if header_str:
+                        st.markdown(header_str)
+                    else:
+                        st.caption("_(aucun en-tête textuel détecté)_")
 
-                # Enrichir les règles KPI avec le mapping de la méthodologie
-                methodology_for_mapping = st.session_state.get("methodology_text", "")
-                methodo_mapping = parse_mapping_from_methodology(methodology_for_mapping)
-                if methodo_mapping:
-                    st.write(f"  📐 Mapping méthodologie détecté — {len(methodo_mapping)} KPI(s) enrichis")
-                    from engine.kpi_engine import DEFAULT_RULES
-                    enriched_rules = enrich_kpi_rules(DEFAULT_RULES, methodo_mapping)
-                else:
-                    enriched_rules = None
-                    st.write("  ℹ️ Pas de mapping méthodologie — utilisation des hints par défaut")
+        # Build mapping DataFrame for the editable table
+        mapping_rows_p2 = st.session_state.get("lot2_mapping_rows") or []
+        mapping_records = []
+        for row in mapping_rows_p2:
+            if row.get("_raw_only"):
+                continue
+            source_type = row.get("source_type", "not_found")
+            if source_type == "lookup":
+                statut_display = "✅ Trouvé"
+            elif source_type == "derived":
+                statut_display = "🔁 Calculé (formule)"
+            else:
+                statut_display = "❌ Non trouvé"
+            mapping_records.append({
+                "kpi_id":            row.get("kpi_id", ""),
+                "Indicateur":        row.get("label_fr", ""),
+                "Unité":             row.get("unite", ""),
+                "Statut":            statut_display,
+                "Onglet détecté":    row.get("onglet_auto", ""),
+                "Colonne détectée":  row.get("colonne_auto", ""),
+                "Onglet corrigé":    "",
+                "Colonne corrigée":  "",
+            })
 
-                kpi_engine = KPIEngine(
-                    raw_data=all_excel_data,
-                    rules=enriched_rules,
-                )
-                kpis = kpi_engine.compute_all()
-                st.session_state["lot2_kpis"] = kpis
+        mapping_df = pd.DataFrame(mapping_records) if mapping_records else pd.DataFrame(
+            columns=["kpi_id", "Indicateur", "Unité", "Statut", "Onglet détecté", "Colonne détectée", "Onglet corrigé", "Colonne corrigée"]
+        )
 
-                df_kpis = kpi_engine.get_as_dataframe()
+        edited_mapping = st.data_editor(
+            mapping_df,
+            key="mapping_editor",
+            disabled=["kpi_id", "Indicateur", "Unité", "Statut", "Onglet détecté", "Colonne détectée"],
+            hide_index=True,
+            use_container_width=True,
+        )
 
-                # Count by status
-                statut_counts = df_kpis["statut"].value_counts()
-                n_bon     = statut_counts.get("bon", 0)
-                n_moyen   = statut_counts.get("moyen", 0)
-                n_faible  = statut_counts.get("faible", 0)
-                n_inconnu = statut_counts.get("inconnu", 0)
+        st.caption(
+            "💡 Remplissez 'Onglet corrigé' et 'Colonne corrigée' pour remplacer la détection automatique. "
+            "Copiez exactement les noms de l'expander ci-dessus."
+        )
 
-                st.write(
-                    f"✅ {len(kpis)} KPIs calculés: "
-                    f"🟢 {n_bon} bons | 🟡 {n_moyen} moyens | "
-                    f"🔴 {n_faible} faibles | ⚪ {n_inconnu} inconnus"
-                )
+        if st.button(
+            "⚙️ Calculer les KPIs",
+            type="primary",
+            use_container_width=True,
+        ):
+            # Build overrides from the edited table
+            overrides = {}
+            for _, erow in edited_mapping.iterrows():
+                onglet_corr  = str(erow.get("Onglet corrigé", "")).strip()
+                colonne_corr = str(erow.get("Colonne corrigée", "")).strip()
+                if onglet_corr and colonne_corr:
+                    kpi_id = erow.get("kpi_id", "")
+                    if kpi_id:
+                        overrides[kpi_id] = {"onglet": onglet_corr, "colonne": colonne_corr}
 
-                # Display KPI table
-                display_df = df_kpis.copy()
-                display_df["statut"] = display_df["statut"].apply(format_kpi_statut)
-                st.dataframe(
-                    display_df[["label_fr", "valeur", "unite", "statut", "onglet", "cellule", "source_type"]],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "label_fr":    st.column_config.TextColumn("Indicateur"),
-                        "valeur":      st.column_config.NumberColumn("Valeur", format="%.2f"),
-                        "unite":       st.column_config.TextColumn("Unité"),
-                        "statut":      st.column_config.TextColumn("Statut"),
-                        "onglet":      st.column_config.TextColumn("Onglet source"),
-                        "cellule":     st.column_config.TextColumn("Cellule"),
-                        "source_type": st.column_config.TextColumn("Type"),
-                    },
-                )
+            st.session_state["lot2_mapping_overrides"] = overrides
 
-                # ── Diagnostic : en-têtes de colonnes trouvées ────────────────
-                all_headers = kpi_engine.list_all_headers()
-                if all_headers:
-                    with st.expander("🔍 Diagnostic — colonnes détectées dans les fichiers Excel", expanded=False):
-                        st.caption(
-                            "Utilisez ces noms de colonnes pour remplir le VU_MAPPING de votre méthodologie. "
-                            "Si un KPI est 'Inconnu', recherchez le bon nom ici et ajoutez-le."
-                        )
-                        for sheet_name, headers in all_headers.items():
-                            # Affiche les 5 premiers caractères du nom pour éviter les noms trop longs
-                            short_name = sheet_name if len(sheet_name) <= 60 else sheet_name[:57] + "..."
-                            st.markdown(f"**`{short_name}`**")
-                            # Affiche les en-têtes en ligne
-                            header_str = " · ".join(
-                                f"`{h}`" for h in headers
-                                if h and str(h).strip() and str(h).strip() != "nan"
-                            )
-                            if header_str:
-                                st.markdown(header_str)
-                            else:
-                                st.caption("_(aucun en-tête textuel détecté)_")
+            with st.status("Étape 2 — Calcul des KPIs...", expanded=True) as status:
+                st.write("Initialisation du moteur KPI...")
 
-                # ── Checklist de disponibilité des données ────────────────
-                st.write("  📋 Vérification de la couverture des données par slide...")
-                data_check = check_slides_data(
-                    kpi_dict=kpis,
-                    methodology_mapping=methodo_mapping,
-                    context_text=st.session_state.get("lot2_context_text", ""),
-                )
-                st.session_state["lot2_data_check"] = data_check
+                try:
+                    raw_excel_data = st.session_state.get("lot2_raw_excel_data") or {"sheets": {}, "source": "combined", "total_sheets": 0}
+                    questionnaire_data = st.session_state.get("lot2_questionnaire_data", {})
 
-                n_ok_check = data_check["summary"].get(STATUS_OK, 0)
-                n_ko_check = (
-                    data_check["summary"].get(STATUS_MISSING, 0)
-                    + data_check["summary"].get(STATUS_PARTIAL, 0)
-                )
-                if n_ko_check > 0:
+                    # Enrich raw_data with questionnaire numeric values
+                    if questionnaire_data.get("numerique"):
+                        quant_sheet = {"headers": ["indicateur", "valeur"], "rows": [], "numeric_cells": []}
+                        for i, (qkey, qval) in enumerate(questionnaire_data["numerique"].items(), start=2):
+                            v = qval.get("valeur")
+                            quant_sheet["rows"].append([qkey, v])
+                            if isinstance(v, (int, float)):
+                                quant_sheet["numeric_cells"].append({
+                                    "ref": f"B{i}",
+                                    "valeur": float(v),
+                                    "sheet": "Questionnaire",
+                                    "row": i,
+                                    "col": 2,
+                                })
+                        raw_excel_data["sheets"]["Questionnaire"] = quant_sheet
+
+                    # Enrichir les règles KPI avec le mapping de la méthodologie
+                    methodology_for_mapping = st.session_state.get("methodology_text", "")
+                    methodo_mapping = parse_mapping_from_methodology(methodology_for_mapping)
+                    if methodo_mapping:
+                        st.write(f"  📐 Mapping méthodologie détecté — {len(methodo_mapping)} KPI(s) enrichis")
+                        from engine.kpi_engine import DEFAULT_RULES
+                        enriched_rules = enrich_kpi_rules(DEFAULT_RULES, methodo_mapping)
+                    else:
+                        enriched_rules = None
+                        st.write("  ℹ️ Pas de mapping méthodologie — utilisation des hints par défaut")
+
+                    kpi_engine = KPIEngine(
+                        raw_data=raw_excel_data,
+                        rules=enriched_rules,
+                    )
+                    kpis = kpi_engine.compute_all(overrides=overrides)
+                    st.session_state["lot2_kpis"] = kpis
+
+                    df_kpis = kpi_engine.get_as_dataframe()
+                    statut_counts = df_kpis["statut"].value_counts()
+                    n_bon     = statut_counts.get("bon", 0)
+                    n_moyen   = statut_counts.get("moyen", 0)
+                    n_faible  = statut_counts.get("faible", 0)
+                    n_inconnu = statut_counts.get("inconnu", 0)
+
                     st.write(
-                        f"  ⚠️ {n_ko_check} slide(s) avec données insuffisantes — "
-                        f"voir la checklist dans les résultats"
-                    )
-                else:
-                    st.write(f"  ✅ Couverture données : {n_ok_check} slides complètes")
-
-                # Auto-save KPIs dans le projet actif
-                pid = st.session_state.get("current_project_id")
-                if pid:
-                    pm.save_kpis(pid, kpis)
-
-                n_warn = data_check["summary"].get(STATUS_MISSING, 0) + data_check["summary"].get(STATUS_PARTIAL, 0)
-                label_suffix = f" — {n_warn} slide(s) avec données insuffisantes ⚠️" if n_warn else " ✅"
-                status.update(label=f"Étape 2 — KPIs calculés{label_suffix}", state="complete")
-
-            except Exception as exc:
-                st.error(f"Erreur lors du calcul des KPIs: {exc}")
-                status.update(label=f"Étape 2 — Erreur: {exc}", state="error")
-                st.stop()
-
-        # ===================================================================
-        # STEP 3 — Generate narrative
-        # ===================================================================
-        with st.status("Étape 3 — Génération du narratif...", expanded=True) as status:
-            if not api_key_is_set():
-                st.warning(
-                    "⚠️ Clé API manquante — La génération LLM est ignorée. "
-                    "Les diapositives seront créées avec des placeholders."
-                )
-                # Create placeholder slides
-                from generation.llm_generator import PERFORMANCE_GLOBALE_SLIDES
-                placeholder_slides = []
-                for slide_def in PERFORMANCE_GLOBALE_SLIDES:
-                    placeholder_slides.append({
-                        "slide_id": slide_def["slide_id"],
-                        "titre": slide_def["titre_defaut"],
-                        "contenu": (
-                            "[Contenu à générer — configurez la clé API Anthropic "
-                            "pour activer la génération automatique]"
-                        ),
-                        "chiffres_cites": [],
-                        "sources": [],
-                        "erreur": None,
-                    })
-                st.session_state["lot2_slides"] = placeholder_slides
-                status.update(
-                    label="Étape 3 — Génération ignorée (pas de clé API)",
-                    state="complete",
-                )
-            else:
-                # Load methodology — priorité : session > bibliothèque active > fichier global
-                methodology = st.session_state.get("methodology_text", "")
-                if not methodology:
-                    active_mid = st.session_state.get("methodo_active_id")
-                    if active_mid:
-                        methodology = ml.get_content(active_mid)
-                    if not methodology:
-                        methodology = load_methodology()
-                if not methodology:
-                    st.warning(
-                        "⚠️ Méthodologie non définie — utilisation des instructions par défaut. "
-                        "Allez dans 'Méthodologie' pour en sélectionner ou générer une."
+                        f"✅ {len(kpis)} KPIs calculés: "
+                        f"🟢 {n_bon} bons | 🟡 {n_moyen} moyens | "
+                        f"🔴 {n_faible} faibles | ⚪ {n_inconnu} inconnus"
                     )
 
-                try:
-                    generator = LLMGenerator(
-                        api_key=get_api_key(),
-                        model=get_model(),
-                    )
-                    kpis = st.session_state["lot2_kpis"]
-
-                    st.write("Génération de 6 diapositives Performance Globale...")
-                    slides = generator.generate_performance_globale(
+                    # Checklist de disponibilité des données
+                    st.write("  📋 Vérification de la couverture des données par slide...")
+                    data_check = check_slides_data(
                         kpi_dict=kpis,
-                        methodology=methodology,
-                        pharmacy_name=pharmacy_name,
+                        methodology_mapping=methodo_mapping,
                         context_text=st.session_state.get("lot2_context_text", ""),
-                        image_results=st.session_state.get("lot1_image_results", []),
                     )
-                    st.session_state["lot2_slides"] = slides
+                    st.session_state["lot2_data_check"] = data_check
 
-                    # Show slide summaries
-                    for slide in slides:
-                        if slide.get("erreur"):
-                            st.write(f"  ❌ {slide['slide_id']}: {slide['erreur']}")
-                        else:
-                            n_chiffres = len(slide.get("chiffres_cites", []))
-                            st.write(
-                                f"  ✅ {slide['slide_id']}: "
-                                f"'{slide['titre']}' — {n_chiffres} chiffre(s) cité(s)"
-                            )
-
-                    # Auto-save slides dans le projet actif
-                    pid = st.session_state.get("current_project_id")
-                    if pid:
-                        pm.save_slides(pid, slides)
-                        pm.update_project_meta(pid, statut="lot2")
-
-                    status.update(
-                        label=f"Étape 3 — {len(slides)} diapositives générées ✅",
-                        state="complete",
+                    n_ok_check = data_check["summary"].get(STATUS_OK, 0)
+                    n_ko_check = (
+                        data_check["summary"].get(STATUS_MISSING, 0)
+                        + data_check["summary"].get(STATUS_PARTIAL, 0)
                     )
-
-                except Exception as exc:
-                    st.error(f"Erreur lors de la génération: {exc}")
-                    status.update(label=f"Étape 3 — Erreur: {exc}", state="error")
-                    st.stop()
-
-        # ===================================================================
-        # STEP 4 — Audit
-        # ===================================================================
-        with st.status("Étape 4 — Audit anti-hallucination...", expanded=True) as status:
-            slides = st.session_state.get("lot2_slides", [])
-            kpis = st.session_state.get("lot2_kpis", {})
-
-            if not slides:
-                st.warning("Aucune diapositive à auditer.")
-                status.update(label="Étape 4 — Ignorée", state="complete")
-            else:
-                audit_engine = AuditEngine()
-
-                # Concatenate all generated content for audit
-                all_content = "\n\n".join(
-                    f"{s.get('titre', '')}\n{s.get('contenu', '')}"
-                    for s in slides
-                    if not s.get("erreur")
-                )
-
-                try:
-                    audit_report = audit_engine.audit(
-                    all_content,
-                    kpis,
-                    context_text=st.session_state.get("lot2_context_text", ""),
-                    methodology_text=st.session_state.get("methodology_text", ""),
-                )
-                    st.session_state["lot2_audit"] = audit_report
-
-                    # Display audit metrics
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Score audit", f"{audit_report['score_pct']:.1f}%")
-                    with col2:
-                        st.metric(
-                            "Nombres validés",
-                            f"{audit_report['validated']}/{audit_report['total_numbers_found']}",
-                        )
-                    with col3:
-                        st.metric("Rejetés", len(audit_report["rejected"]))
-                    with col4:
-                        result_label = "✅ PASSÉ" if audit_report["passed"] else "❌ ÉCHOUÉ"
-                        st.metric("Résultat", result_label)
-
-                    if audit_report["passed"]:
-                        st.success(f"✅ {audit_report['message']}")
-                        status.update(
-                            label=f"Étape 4 — Audit réussi ({audit_report['score_pct']:.1f}%) ✅",
-                            state="complete",
+                    if n_ko_check > 0:
+                        st.write(
+                            f"  ⚠️ {n_ko_check} slide(s) avec données insuffisantes — "
+                            f"voir la checklist dans les résultats"
                         )
                     else:
-                        st.error(f"❌ {audit_report['message']}")
-                        status.update(
-                            label=f"Étape 4 — Audit échoué ({audit_report['score_pct']:.1f}%)",
-                            state="error",
-                        )
+                        st.write(f"  ✅ Couverture données : {n_ok_check} slides complètes")
 
-                except Exception as exc:
-                    st.error(f"Erreur lors de l'audit: {exc}")
-                    status.update(label=f"Étape 4 — Erreur: {exc}", state="error")
-
-        # ===================================================================
-        # STEP 5 — Build PPTX
-        # ===================================================================
-        with st.status("Étape 5 — Assemblage du PowerPoint...", expanded=True) as status:
-            slides = st.session_state.get("lot2_slides", [])
-            audit_report = st.session_state.get("lot2_audit", {})
-
-            if not slides:
-                st.warning("Aucune diapositive à assembler.")
-                status.update(label="Étape 5 — Ignorée", state="complete")
-            else:
-                try:
-                    assembler = PPTXAssembler()
-                    pptx_bytes = assembler.build(
-                        slides_content=slides,
-                        pharmacy_name=pharmacy_name,
-                    )
-                    st.session_state["lot2_pptx_bytes"] = pptx_bytes
-
-                    size_kb = len(pptx_bytes) / 1024
-                    st.write(f"✅ PowerPoint assemblé ({size_kb:.1f} Ko, {len(slides)+1} diapositive(s))")
-
-                    # Auto-save PPTX dans le projet actif
+                    # Auto-save KPIs dans le projet actif
                     pid = st.session_state.get("current_project_id")
                     if pid:
-                        pm.save_pptx(pid, pptx_bytes)
-                        st.write("💾 PPTX sauvegardé dans le projet")
+                        pm.save_kpis(pid, kpis)
 
-                    status.update(label="Étape 5 — PowerPoint prêt ✅", state="complete")
+                    st.session_state["lot2_kpis_computed"] = True
+
+                    n_warn = data_check["summary"].get(STATUS_MISSING, 0) + data_check["summary"].get(STATUS_PARTIAL, 0)
+                    label_suffix = f" — {n_warn} slide(s) avec données insuffisantes ⚠️" if n_warn else " ✅"
+                    status.update(label=f"Étape 2 — KPIs calculés{label_suffix}", state="complete")
+
+                    st.success(
+                        f"✅ {len(kpis)} KPIs calculés — "
+                        f"🟢 {n_bon} bons | 🟡 {n_moyen} moyens | 🔴 {n_faible} faibles | ⚪ {n_inconnu} inconnus"
+                    )
 
                 except Exception as exc:
-                    st.error(f"Erreur lors de l'assemblage PPTX: {exc}")
-                    status.update(label=f"Étape 5 — Erreur: {exc}", state="error")
+                    st.error(f"Erreur lors du calcul des KPIs: {exc}")
+                    status.update(label=f"Étape 2 — Erreur: {exc}", state="error")
+
+    # ── Phase 3 ─────────────────────────────────────────────────────────────────
+    # Shown after KPIs are computed — review + generate slides
+    # ─────────────────────────────────────────────────────────────────────────────
+    if st.session_state.get("lot2_kpis_computed"):
+        st.markdown("---")
+        st.markdown(
+            "<div style='font-size:0.65rem;font-weight:700;color:#5D6D7E;text-transform:uppercase;"
+            "letter-spacing:0.12em;margin:0.5rem 0 0.75rem;'>Phase 3 — Revue des KPIs calculés</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Display KPI table
+        kpis_p3 = st.session_state.get("lot2_kpis", {})
+        if kpis_p3:
+            _kpi_engine_p3 = KPIEngine(raw_data={"sheets": {}, "source": ""})
+            _kpi_engine_p3._kpis = kpis_p3
+            df_p3 = _kpi_engine_p3.get_as_dataframe()
+            display_df_p3 = df_p3.copy()
+            st.dataframe(
+                display_df_p3[["label_fr", "valeur", "unite", "statut", "onglet", "matched_col", "source_type"]],
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "label_fr":    st.column_config.TextColumn("Indicateur"),
+                    "valeur":      st.column_config.NumberColumn("Valeur", format="%.2f"),
+                    "unite":       st.column_config.TextColumn("Unité"),
+                    "statut":      st.column_config.TextColumn("Statut"),
+                    "onglet":      st.column_config.TextColumn("Onglet source"),
+                    "matched_col": st.column_config.TextColumn("Colonne"),
+                    "source_type": st.column_config.TextColumn("Type"),
+                },
+            )
+
+            # Color-coded summary
+            statut_counts_p3 = df_p3["statut"].value_counts()
+            n_bon_p3     = statut_counts_p3.get("bon", 0)
+            n_moyen_p3   = statut_counts_p3.get("moyen", 0)
+            n_faible_p3  = statut_counts_p3.get("faible", 0)
+            n_inconnu_p3 = statut_counts_p3.get("inconnu", 0)
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                st.metric("🟢 Bons", n_bon_p3)
+            with col_b:
+                st.metric("🟡 Moyens", n_moyen_p3)
+            with col_c:
+                st.metric("🔴 Faibles", n_faible_p3)
+            with col_d:
+                st.metric("⚪ Inconnus", n_inconnu_p3)
+
+        # Data checklist
+        data_check_p3 = st.session_state.get("lot2_data_check")
+        if data_check_p3:
+            _render_data_checklist(data_check_p3, expanded=True)
+
+        st.info(
+            "Vérifiez les KPIs ci-dessus. Si des valeurs sont incorrectes, "
+            "retournez en Phase 2 pour corriger le mapping."
+        )
+
+        # Generate slides button
+        _p3_pharmacy_name = st.session_state.get("lot2_pharmacy_name", pharmacy_name)
+        if st.button(
+            "🚀 Générer les slides",
+            type="primary",
+            use_container_width=True,
+        ):
+            kpis = st.session_state.get("lot2_kpis", {})
+
+            # ===================================================================
+            # STEP 3 — Generate narrative
+            # ===================================================================
+            with st.status("Étape 3 — Génération du narratif...", expanded=True) as status:
+                if not api_key_is_set():
+                    st.warning(
+                        "⚠️ Clé API manquante — La génération LLM est ignorée. "
+                        "Les diapositives seront créées avec des placeholders."
+                    )
+                    # Create placeholder slides
+                    from generation.llm_generator import PERFORMANCE_GLOBALE_SLIDES
+                    placeholder_slides = []
+                    for slide_def in PERFORMANCE_GLOBALE_SLIDES:
+                        placeholder_slides.append({
+                            "slide_id": slide_def["slide_id"],
+                            "titre": slide_def["titre_defaut"],
+                            "contenu": (
+                                "[Contenu à générer — configurez la clé API Anthropic "
+                                "pour activer la génération automatique]"
+                            ),
+                            "chiffres_cites": [],
+                            "sources": [],
+                            "erreur": None,
+                        })
+                    st.session_state["lot2_slides"] = placeholder_slides
+                    status.update(
+                        label="Étape 3 — Génération ignorée (pas de clé API)",
+                        state="complete",
+                    )
+                else:
+                    # Load methodology — priorité : session > bibliothèque active > fichier global
+                    methodology = st.session_state.get("methodology_text", "")
+                    if not methodology:
+                        active_mid = st.session_state.get("methodo_active_id")
+                        if active_mid:
+                            methodology = ml.get_content(active_mid)
+                        if not methodology:
+                            methodology = load_methodology()
+                    if not methodology:
+                        st.warning(
+                            "⚠️ Méthodologie non définie — utilisation des instructions par défaut. "
+                            "Allez dans 'Méthodologie' pour en sélectionner ou générer une."
+                        )
+
+                    try:
+                        generator = LLMGenerator(
+                            api_key=get_api_key(),
+                            model=get_model(),
+                        )
+
+                        st.write("Génération de 6 diapositives Performance Globale...")
+                        slides = generator.generate_performance_globale(
+                            kpi_dict=kpis,
+                            methodology=methodology,
+                            pharmacy_name=_p3_pharmacy_name,
+                            context_text=st.session_state.get("lot2_context_text", ""),
+                            image_results=st.session_state.get("lot1_image_results", []),
+                        )
+                        st.session_state["lot2_slides"] = slides
+
+                        # Show slide summaries
+                        for slide in slides:
+                            if slide.get("erreur"):
+                                st.write(f"  ❌ {slide['slide_id']}: {slide['erreur']}")
+                            else:
+                                n_chiffres = len(slide.get("chiffres_cites", []))
+                                st.write(
+                                    f"  ✅ {slide['slide_id']}: "
+                                    f"'{slide['titre']}' — {n_chiffres} chiffre(s) cité(s)"
+                                )
+
+                        # Auto-save slides dans le projet actif
+                        pid = st.session_state.get("current_project_id")
+                        if pid:
+                            pm.save_slides(pid, slides)
+                            pm.update_project_meta(pid, statut="lot2")
+
+                        status.update(
+                            label=f"Étape 3 — {len(slides)} diapositives générées ✅",
+                            state="complete",
+                        )
+
+                    except Exception as exc:
+                        st.error(f"Erreur lors de la génération: {exc}")
+                        status.update(label=f"Étape 3 — Erreur: {exc}", state="error")
+                        st.stop()
+
+            # ===================================================================
+            # STEP 4 — Audit
+            # ===================================================================
+            with st.status("Étape 4 — Audit anti-hallucination...", expanded=True) as status:
+                slides = st.session_state.get("lot2_slides", [])
+                kpis = st.session_state.get("lot2_kpis", {})
+
+                if not slides:
+                    st.warning("Aucune diapositive à auditer.")
+                    status.update(label="Étape 4 — Ignorée", state="complete")
+                else:
+                    audit_engine = AuditEngine()
+
+                    # Concatenate all generated content for audit
+                    all_content = "\n\n".join(
+                        f"{s.get('titre', '')}\n{s.get('contenu', '')}"
+                        for s in slides
+                        if not s.get("erreur")
+                    )
+
+                    try:
+                        audit_report = audit_engine.audit(
+                            all_content,
+                            kpis,
+                            context_text=st.session_state.get("lot2_context_text", ""),
+                            methodology_text=st.session_state.get("methodology_text", ""),
+                        )
+                        st.session_state["lot2_audit"] = audit_report
+
+                        # Display audit metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Score audit", f"{audit_report['score_pct']:.1f}%")
+                        with col2:
+                            st.metric(
+                                "Nombres validés",
+                                f"{audit_report['validated']}/{audit_report['total_numbers_found']}",
+                            )
+                        with col3:
+                            st.metric("Rejetés", len(audit_report["rejected"]))
+                        with col4:
+                            result_label = "✅ PASSÉ" if audit_report["passed"] else "❌ ÉCHOUÉ"
+                            st.metric("Résultat", result_label)
+
+                        if audit_report["passed"]:
+                            st.success(f"✅ {audit_report['message']}")
+                            status.update(
+                                label=f"Étape 4 — Audit réussi ({audit_report['score_pct']:.1f}%) ✅",
+                                state="complete",
+                            )
+                        else:
+                            st.error(f"❌ {audit_report['message']}")
+                            status.update(
+                                label=f"Étape 4 — Audit échoué ({audit_report['score_pct']:.1f}%)",
+                                state="error",
+                            )
+
+                    except Exception as exc:
+                        st.error(f"Erreur lors de l'audit: {exc}")
+                        status.update(label=f"Étape 4 — Erreur: {exc}", state="error")
+
+            # ===================================================================
+            # STEP 5 — Build PPTX
+            # ===================================================================
+            with st.status("Étape 5 — Assemblage du PowerPoint...", expanded=True) as status:
+                slides = st.session_state.get("lot2_slides", [])
+                audit_report = st.session_state.get("lot2_audit", {})
+
+                if not slides:
+                    st.warning("Aucune diapositive à assembler.")
+                    status.update(label="Étape 5 — Ignorée", state="complete")
+                else:
+                    try:
+                        assembler = PPTXAssembler()
+                        pptx_bytes = assembler.build(
+                            slides_content=slides,
+                            pharmacy_name=_p3_pharmacy_name,
+                        )
+                        st.session_state["lot2_pptx_bytes"] = pptx_bytes
+
+                        size_kb = len(pptx_bytes) / 1024
+                        st.write(f"✅ PowerPoint assemblé ({size_kb:.1f} Ko, {len(slides)+1} diapositive(s))")
+
+                        # Auto-save PPTX dans le projet actif
+                        pid = st.session_state.get("current_project_id")
+                        if pid:
+                            pm.save_pptx(pid, pptx_bytes)
+                            st.write("💾 PPTX sauvegardé dans le projet")
+
+                        status.update(label="Étape 5 — PowerPoint prêt ✅", state="complete")
+
+                    except Exception as exc:
+                        st.error(f"Erreur lors de l'assemblage PPTX: {exc}")
+                        status.update(label=f"Étape 5 — Erreur: {exc}", state="error")
+
+        # Reset button
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+        if st.button(
+            "🔄 Recommencer (Phase 1)",
+            type="secondary",
+            use_container_width=True,
+        ):
+            st.session_state["lot2_parse_done"]    = False
+            st.session_state["lot2_kpis_computed"] = False
+            st.session_state["lot2_kpis"]          = None
+            st.session_state["lot2_slides"]        = None
+            st.session_state["lot2_audit"]         = None
+            st.session_state["lot2_pptx_bytes"]    = None
+            st.rerun()
 
     # -----------------------------------------------------------------------
     # Results display (persistent, outside the pipeline button block)
