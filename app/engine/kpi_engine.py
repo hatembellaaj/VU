@@ -60,16 +60,12 @@ RAW_RULES: dict = {
         "seuil_bas": 0,
         "seuil_haut": 99_999_999,
         "sheet_hints": ["TVA", "Ventes par TVA", "Remboursé", "Remboursable"],
-        "header_hints": [
-            "tva 2,1", "tva 2.1", "2,1%", "2.1%",
-            "remboursable", "remboursé", "rembourse",
-            "ca ordo", "ca ordonnances", "ca remboursable",
-            "ventes remboursables",
-        ],
-        # Sommer les 12 mois pour obtenir le total annuel
-        "prefer_row": "sum",
+        "header_hints": ["ca ht", "ca ht n", "montant ht", "ca"],
+        # Filtre : uniquement la ligne où Taux de TVA = 2,1%
+        "row_filter": {"col": "Taux de TVA", "val": "2,1"},
+        "prefer_row": "first",
         "min_value": 1_000,
-        "preferred_sheets_only": True,   # ne PAS chercher dans les transactions brutes
+        "preferred_sheets_only": True,
     },
     "ca_hors_ordos": {
         "label_fr": "CA hors ordonnances (libre accès)",
@@ -292,17 +288,18 @@ DERIVED_RULES: dict = {
         "seuil_haut": 80.0,
         # Cherche d'abord une colonne directe (dans feuilles dédiées seulement)
         "direct_hints": {
-            "sheet_hints": ["Répartition", "Ordonnances", "Synthese", "Synthèse"],
+            "sheet_hints": ["Répartition", "Ordonnances", "Synthese", "Synthèse", "Panier", "IMG::"],
             "header_hints": [
                 "part ordonnances", "% ordonnances", "taux ordo",
                 "part ordo", "% ordo", "part rx", "part remboursable",
                 "% remboursable",
+                "repartition ca ttc ordonnances", "repartition ordonnances ca",
                 # NOTE: "% tva 2,1" retiré — correspond au taux TVA (2.1), pas à la part
             ],
             "prefer_row": "last",
-            "min_value": 20,     # part ordo < 20% serait aberrant pour une pharmacie française
+            "min_value": 20,
             "max_value": 100,
-            "preferred_sheets_only": True,
+            "preferred_sheets_only": False,
         },
         # Si colonne directe absente → calcul
         "formula": lambda kpis: (
@@ -320,12 +317,14 @@ DERIVED_RULES: dict = {
         "seuil_bas": 100,
         "seuil_haut": 250,
         "direct_hints": {
-            "sheet_hints": ["Fréquentation", "Frequentation", "Clients", "Activité"],
+            "sheet_hints": ["Fréquentation", "Frequentation", "Clients", "Activité", "IMG::"],
             "header_hints": [
                 "frequentation/jour", "frequentation journaliere",
                 "clients/jour", "clients par jour", "passages/jour",
                 "fréquentation journalière", "nb visites/jour",
                 "fréquentation j", "freq/j",
+                "ventes par jour", "moyenne ventes jour",
+                "en moyenne vous avez",
             ],
             "prefer_row": "last",
             "min_value": 10,
@@ -345,9 +344,10 @@ DERIVED_RULES: dict = {
         "seuil_bas": 20.0,
         "seuil_haut": 45.0,
         "direct_hints": {
-            "sheet_hints": ["Panier", "Ticket", "CA", "Commercial"],
+            "sheet_hints": ["Panier", "Ticket", "CA", "Commercial", "IMG::"],
             "header_hints": [
                 "panier moyen", "ticket moyen", "panier moyen total",
+                "global", "panier global",
             ],
             "prefer_row": "last",
             "min_value": 5,
@@ -368,10 +368,11 @@ DERIVED_RULES: dict = {
         "seuil_bas": 45.0,
         "seuil_haut": 75.0,
         "direct_hints": {
-            "sheet_hints": ["Panier", "Ticket", "Ordonnances", "Commercial"],
+            "sheet_hints": ["Panier", "Ticket", "Ordonnances", "Commercial", "IMG::"],
             "header_hints": [
                 "panier ordonnances", "panier ordo", "ticket ordo",
                 "panier rx", "panier moyen ordo", "panier moyen ordonnances",
+                "ordonnance",
             ],
             "prefer_row": "last",
             "min_value": 5,
@@ -489,6 +490,50 @@ class KPIEngine:
 
     # ── Core lookup ─────────────────────────────────────────────────────────
 
+    def _find_in_image_sheet(
+        self,
+        sheet_name: str,
+        sheet_data: dict,
+        header_hints: list,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+    ) -> tuple:
+        """
+        Recherche spéciale pour les feuilles images (IMG::...).
+        Structure : headers=["label","valeur","unite","confiance"], rows=[["Panier moyen", 43.02, ...]]
+        Cherche dans la colonne "label" (valeurs texte) plutôt que dans les en-têtes.
+        Returns (value, sheet_name, cell_ref, label_matched) or (None, None, None, None).
+        """
+        headers = sheet_data.get("headers", [])
+        rows    = sheet_data.get("rows", [])
+
+        # Trouve les indices des colonnes "label" et "valeur"
+        norm_headers = [self._normalize_str(h) for h in headers]
+        try:
+            label_idx = norm_headers.index("label")
+            valeur_idx = norm_headers.index("valeur")
+        except ValueError:
+            return None, None, None, None
+
+        for row in rows:
+            if len(row) <= max(label_idx, valeur_idx):
+                continue
+            row_label = self._normalize_str(str(row[label_idx]))
+            for hint in header_hints:
+                norm_hint = self._normalize_str(hint)
+                if norm_hint in row_label or row_label in norm_hint:
+                    val = row[valeur_idx]
+                    if not isinstance(val, (int, float)) or isinstance(val, bool):
+                        continue
+                    fval = float(val)
+                    if min_value is not None and fval < min_value:
+                        continue
+                    if max_value is not None and fval > max_value:
+                        continue
+                    return fval, sheet_name, f"label={row[label_idx]}", str(row[label_idx])
+
+        return None, None, None, None
+
     def _find_value_in_sheets(
         self,
         header_hints: list,
@@ -498,6 +543,7 @@ class KPIEngine:
         max_value: Optional[float] = None,
         preferred_sheets_only: bool = False,
         aggregate: Optional[str] = None,
+        row_filter: Optional[dict] = None,
     ) -> tuple:
         """
         Search for a KPI value in parsed sheets.
@@ -515,7 +561,11 @@ class KPIEngine:
         aggregate:
           "sum" — additionne toutes les valeurs de la colonne (pour CA mensuel → annuel)
 
-        Returns (value, sheet_name, cell_ref) or (None, None, None).
+        row_filter:
+          {"col": "Taux de TVA", "val": "2,1%"} — ne garde que les lignes où col == val
+          Utile pour isoler une ligne spécifique dans un tableau multi-lignes (ex: TVA 2,1%).
+
+        Returns (value, sheet_name, cell_ref, matched_col) or (None, None, None, None).
         AUCUN fallback heuristique — retourne None si aucun header ne correspond.
         """
         sheets = self.raw_data.get("sheets", {})
@@ -536,9 +586,30 @@ class KPIEngine:
 
         for sheet_name in search_order:
             sheet_data = sheets[sheet_name]
+
+            # ── Feuilles images : logique label/valeur ───────────────────────
+            if sheet_name.startswith("IMG::"):
+                val, sn, cr, col = self._find_in_image_sheet(
+                    sheet_name, sheet_data, header_hints, min_value, max_value
+                )
+                if val is not None:
+                    return val, sn, cr, col
+                continue  # ne pas appliquer la logique Excel aux images
+
             headers = sheet_data.get("headers", [])
             rows    = sheet_data.get("rows", [])
             numeric_cells = sheet_data.get("numeric_cells", [])
+
+            # ── Résolution de row_filter : trouve l'index de la colonne filtre ──
+            filter_col_idx = None
+            filter_val_norm = None
+            if row_filter:
+                filter_col_norm = self._normalize_str(row_filter.get("col", ""))
+                filter_val_norm = self._normalize_str(str(row_filter.get("val", "")))
+                for hi, hdr in enumerate(headers):
+                    if self._normalize_str(hdr) == filter_col_norm:
+                        filter_col_idx = hi
+                        break
 
             for col_idx, header in enumerate(headers):
                 norm_header = self._normalize_str(header)
@@ -548,6 +619,13 @@ class KPIEngine:
                         # Collecte toutes les valeurs numériques de cette colonne
                         candidates = []
                         for row_idx, row in enumerate(rows):
+                            # Applique le filtre de ligne si défini
+                            if filter_col_idx is not None and filter_val_norm is not None:
+                                if filter_col_idx >= len(row):
+                                    continue
+                                cell_norm = self._normalize_str(str(row[filter_col_idx]))
+                                if filter_val_norm not in cell_norm and cell_norm not in filter_val_norm:
+                                    continue
                             if col_idx < len(row):
                                 val = row[col_idx]
                                 if isinstance(val, (int, float)) and not isinstance(val, bool):
@@ -712,6 +790,7 @@ class KPIEngine:
                 max_value=rule.get("max_value"),
                 preferred_sheets_only=rule.get("preferred_sheets_only", False),
                 aggregate=rule.get("aggregate"),
+                row_filter=rule.get("row_filter"),
             )
             rows.append({
                 "kpi_id":       kpi_id,
@@ -808,6 +887,7 @@ class KPIEngine:
                 max_value=rule.get("max_value"),
                 preferred_sheets_only=rule.get("preferred_sheets_only", False),
                 aggregate=rule.get("aggregate"),
+                row_filter=rule.get("row_filter"),
             )
             return v, s, c, col, "lookup"
 
