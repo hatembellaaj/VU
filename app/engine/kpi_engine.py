@@ -171,7 +171,7 @@ RAW_RULES: dict = {
         "_raw_only": True,   # intermédiaire, utilisé par les formules dérivées
         "seuil_bas": 0,
         "seuil_haut": 99_999,
-        "sheet_hints": ["ETP", "RH", "Ressources humaines", "Personnel", "Effectifs"],
+        "sheet_hints": ["ETP", "RH", "Ressources humaines", "Personnel", "Effectifs", "Feuille", "Donnees RH", "RH 2026"],
         "header_hints": [
             "etp", "nb etp", "nombre etp", "effectif etp",
             "equivalent temps plein", "équivalent temps plein",
@@ -235,7 +235,7 @@ RAW_RULES: dict = {
         "unite": "clients",
         "seuil_bas": 2_000,
         "seuil_haut": 8_000,
-        "sheet_hints": ["Clients", "Fidélisation", "Fidelisation", "Activité"],
+        "sheet_hints": ["Clients", "Fidélisation", "Fidelisation", "Activité", "Feuille", "Donnees RH", "RH 2026"],
         "header_hints": [
             "clients actifs", "nb clients actifs", "nombre clients actifs",
             "patients actifs", "nb patients actifs",
@@ -248,7 +248,7 @@ RAW_RULES: dict = {
         "unite": "%",
         "seuil_bas": 40.0,
         "seuil_haut": 70.0,
-        "sheet_hints": ["Fidélisation", "Fidelisation", "Clients"],
+        "sheet_hints": ["Fidélisation", "Fidelisation", "Clients", "Feuille", "Donnees RH", "RH 2026"],
         "header_hints": [
             "fidélisation", "fidelisation", "taux fidel",
             "taux de fidelisation", "retention", "rétention",
@@ -262,7 +262,7 @@ RAW_RULES: dict = {
         "unite": "indice",
         "seuil_bas": 0.7,
         "seuil_haut": 1.3,
-        "sheet_hints": ["Saisonnalité", "Saisonnalite", "Mois"],
+        "sheet_hints": ["Saisonnalité", "Saisonnalite", "Mois", "Feuille", "Donnees RH", "RH 2026"],
         "header_hints": [
             "saisonnalité", "saisonnalite", "indice saison", "seasonal",
             "indice mensuel",
@@ -299,7 +299,7 @@ DERIVED_RULES: dict = {
             "prefer_row": "last",
             "min_value": 20,
             "max_value": 100,
-            "preferred_sheets_only": False,
+            "preferred_sheets_only": True,
         },
         # Si colonne directe absente → calcul
         "formula": lambda kpis: (
@@ -870,12 +870,14 @@ class KPIEngine:
             """Retourne (valeur, onglet, cellule, matched_col) pour un KPI brut."""
             ov = overrides.get(kpi_id, {})
             if ov.get("onglet") and ov.get("colonne"):
-                # Override utilisateur : recherche exacte
+                # Override utilisateur : recherche exacte.
+                # On fait confiance au choix de l'utilisateur → pas de filtre min/max,
+                # prefer_row="sum" par défaut (additionne les lignes mensuelles/par taux).
                 v, s, c, col = self._find_exact(
                     ov["onglet"], ov["colonne"],
-                    prefer_row=ov.get("prefer_row", rule.get("prefer_row", "sum")),
-                    min_value=rule.get("min_value"),
-                    max_value=rule.get("max_value"),
+                    prefer_row=ov.get("prefer_row", "sum"),
+                    min_value=None,   # pas de filtre — l'utilisateur a choisi cette colonne
+                    max_value=None,
                 )
                 return v, s, c, col, "override"
             # Détection automatique
@@ -935,15 +937,13 @@ class KPIEngine:
             ov = overrides.get(kpi_id, {})
             valeur, onglet, cellule, matched_col, source_type = None, None, None, None, None
 
-            # 2a : override utilisateur → recherche exacte
+            # 2a : override utilisateur → recherche exacte, sans filtre min/max
             if ov.get("onglet") and ov.get("colonne"):
-                all_rules_merged = {**self.rules, **DERIVED_RULES}
-                ref_rule = all_rules_merged.get(kpi_id, rule)
                 valeur, onglet, cellule, matched_col = self._find_exact(
                     ov["onglet"], ov["colonne"],
-                    prefer_row=ov.get("prefer_row", "last"),
-                    min_value=rule.get("seuil_bas"),
-                    max_value=rule.get("seuil_haut"),
+                    prefer_row=ov.get("prefer_row", "sum"),
+                    min_value=None,
+                    max_value=None,
                 )
                 if valeur is not None:
                     source_type = "override"

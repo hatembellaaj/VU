@@ -1,7 +1,44 @@
 import io
+import re
+import datetime
 from typing import Union
 import openpyxl
 from openpyxl.utils import get_column_letter
+
+
+def _try_numeric(value) -> float | None:
+    """
+    Tente de convertir une valeur cellule en float.
+    Gère les cas :
+      - int/float natifs → direct
+      - strings formatées : '813 673 €', '3 086,97€', '+10.30 %', '-19.15 %'
+        avec espaces insécables ( , \xa0), virgule décimale, symboles €/%/+
+      - datetime → None (pas une mesure KPI)
+      - None, bool → None
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, datetime.datetime):
+        return None
+    if not isinstance(value, str):
+        return None
+    # Nettoyage
+    s = value.strip()
+    s = s.replace(' ', '').replace('\xa0', '').replace(' ', '')  # espaces insécables
+    s = s.replace(' ', '')       # espaces ordinaires (séparateurs de milliers)
+    s = s.replace('€', '').replace('%', '')
+    s = s.replace('+', '')
+    s = s.replace(',', '.')      # virgule décimale → point
+    # Supprime tout sauf chiffres, point, signe moins
+    s = re.sub(r'[^\d.\-]', '', s)
+    if not s or s in ('.', '-', '-.'):
+        return None
+    try:
+        return float(s)
+    except ValueError:
+        return None
 
 
 class ExcelParser:
@@ -68,20 +105,23 @@ class ExcelParser:
             # Extract data rows (all rows after header)
             if header_row_index is not None:
                 for row in all_rows[header_row_index + 1:]:
-                    row_values = [cell.value for cell in row]
+                    # Convertit chaque cellule : float si numérique, valeur brute sinon
+                    row_values = []
+                    for cell in row:
+                        num = _try_numeric(cell.value)
+                        row_values.append(num if num is not None else cell.value)
                     rows.append(row_values)
 
-                    # Extract numeric cells
+                    # Extract numeric cells (y compris strings formatées '813 673 €')
                     for cell in row:
-                        if isinstance(cell.value, (int, float)) and not isinstance(
-                            cell.value, bool
-                        ):
+                        num = _try_numeric(cell.value)
+                        if num is not None:
                             col_letter = get_column_letter(cell.column)
                             ref = f"{col_letter}{cell.row}"
                             numeric_cells.append(
                                 {
                                     "ref": ref,
-                                    "valeur": float(cell.value),
+                                    "valeur": num,
                                     "sheet": sheet_name,
                                     "row": cell.row,
                                     "col": cell.column,
@@ -90,15 +130,14 @@ class ExcelParser:
 
                 # Also check header row for numeric values
                 for cell in all_rows[header_row_index]:
-                    if isinstance(cell.value, (int, float)) and not isinstance(
-                        cell.value, bool
-                    ):
+                    num = _try_numeric(cell.value)
+                    if num is not None:
                         col_letter = get_column_letter(cell.column)
                         ref = f"{col_letter}{cell.row}"
                         numeric_cells.append(
                             {
                                 "ref": ref,
-                                "valeur": float(cell.value),
+                                "valeur": num,
                                 "sheet": sheet_name,
                                 "row": cell.row,
                                 "col": cell.column,
